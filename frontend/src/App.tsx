@@ -12,6 +12,7 @@
 
 import { useState, useRef } from 'react';
 import axios from 'axios';
+import apiClient from './api/axios';
 import ReactMarkdown from 'react-markdown';
 import { Shield, Code, Github, FileUp, Loader2, Send, AlertTriangle } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
@@ -54,7 +55,7 @@ export default function App() {
     setReport(null);
 
     try {
-      const response = await axios.post('http://localhost:8080/api/analyze', {
+      const response = await apiClient.post('/api/analyze', {
         inputType: inputType === 'file' ? 'text' : inputType,
         content
       });
@@ -229,7 +230,8 @@ export default function App() {
                   p: ({node: _node, ...props}) => <p className="mb-4 text-gray-700 leading-relaxed" {...props} />,
                   ul: ({node: _node, ...props}) => <ul className="list-disc pl-6 mb-4 space-y-2 text-gray-700" {...props} />,
                   li: ({node: _node, ...props}) => <li {...props} />,
-                  code: ({node: _node, inline, ...props}: {inline?: boolean, [key: string]: unknown}) => (
+                  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                  code: ({node: _node, inline, ...props}: any) => (
                     inline 
                       ? <code className="bg-gray-100 text-red-600 px-1.5 py-0.5 rounded font-mono text-sm" {...props} />
                       : <div className="bg-gray-900 rounded-xl p-4 my-4 overflow-x-auto"><code className="text-gray-100 font-mono text-sm" {...props} /></div>
