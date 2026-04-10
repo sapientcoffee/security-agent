@@ -1,0 +1,16 @@
+{
+  "name": "security-audit-monorepo",
+  "private": true,
+  "packageManager": "npm@10.2.4",
+  "workspaces": [
+    "agent",
+    "frontend"
+  ],
+  "scripts": {
+    "lint": "turbo lint",
+    "format": "turbo format"
+  },
+  "devDependencies": {
+    "turbo": "latest"
+  }
+}

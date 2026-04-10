@@ -77,9 +77,6 @@ export async function processGitRepo(repoUrl) {
     }
 
     return combinedContent;
-  } catch (error) {
-    // We re-throw without logging here to avoid duplicate error logs in the server's main handler.
-    throw error;
   } finally {
     try {
       logger.info(`Cleaning up temporary directory: ${tempDir}`, { module: 'git' });

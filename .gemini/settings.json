@@ -1,0 +1,54 @@
+{
+  "general": {
+    "previewFeatures": true
+  },
+  "hooks": {
+    "enabled": ["*"],
+    "AfterTool": [
+      {
+        "matcher": ".*write_file|.*replace",
+        "hooks": [
+          {
+            "name": "lint-on-change",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/lint-on-change.sh",
+            "timeout": 30000,
+            "description": "Runs the relevant lint test after a file is modified."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "name": "coffee-and-git",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/coffee-and-git.sh",
+            "description": "Provides a coffee tip and git history at the start of the session"
+          },
+          {
+            "name": "git-status",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/git-status.sh",
+            "description": "Injects git status into the context"
+          }
+        ]
+      }
+    ],
+    "AfterAgent": [
+      {
+        "matcher": "*",
+        "hooks": [
+          {
+            "name": "implementation-loop",
+            "type": "command",
+            "command": "$GEMINI_PROJECT_DIR/.gemini/hooks/stop-loop.sh",
+            "description": "The Ralph infinite loop mechanism"
+          }
+        ]
+      }
+    ]
+  }
+}

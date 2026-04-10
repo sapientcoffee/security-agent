@@ -1,3 +1,15 @@
+// Copyright 2026 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 import { useState, useRef } from 'react';
 import axios from 'axios';
 import ReactMarkdown from 'react-markdown';
@@ -47,15 +59,19 @@ export default function App() {
         content
       });
       setReport(response.data.report);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
-      setError(err.response?.data?.message || err.message || 'An unexpected error occurred during analysis.');
+      if (axios.isAxiosError(err)) {
+        setError(err.response?.data?.message || err.message || 'An unexpected error occurred during analysis.');
+      } else {
+        setError(err instanceof Error ? err.message : 'An unexpected error occurred during analysis.');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  const TabButton = ({ type, icon: Icon, label }: { type: InputType; icon: any; label: string }) => (
+  const TabButton = ({ type, icon: Icon, label }: { type: InputType; icon: React.ElementType; label: string }) => (
     <button
       onClick={() => {
         setInputType(type);
@@ -207,18 +223,18 @@ export default function App() {
             <div className="p-8 prose prose-slate max-w-none">
               <ReactMarkdown 
                 components={{
-                  h1: ({node, ...props}) => <h1 className="text-3xl font-bold mt-6 mb-4 border-b pb-2" {...props} />,
-                  h2: ({node, ...props}) => <h2 className="text-2xl font-bold mt-6 mb-3" {...props} />,
-                  h3: ({node, ...props}) => <h3 className="text-xl font-bold mt-5 mb-2" {...props} />,
-                  p: ({node, ...props}) => <p className="mb-4 text-gray-700 leading-relaxed" {...props} />,
-                  ul: ({node, ...props}) => <ul className="list-disc pl-6 mb-4 space-y-2 text-gray-700" {...props} />,
-                  li: ({node, ...props}) => <li {...props} />,
-                  code: ({node, inline, ...props}: any) => (
+                  h1: ({node: _node, ...props}) => <h1 className="text-3xl font-bold mt-6 mb-4 border-b pb-2" {...props} />,
+                  h2: ({node: _node, ...props}) => <h2 className="text-2xl font-bold mt-6 mb-3" {...props} />,
+                  h3: ({node: _node, ...props}) => <h3 className="text-xl font-bold mt-5 mb-2" {...props} />,
+                  p: ({node: _node, ...props}) => <p className="mb-4 text-gray-700 leading-relaxed" {...props} />,
+                  ul: ({node: _node, ...props}) => <ul className="list-disc pl-6 mb-4 space-y-2 text-gray-700" {...props} />,
+                  li: ({node: _node, ...props}) => <li {...props} />,
+                  code: ({node: _node, inline, ...props}: {inline?: boolean, [key: string]: unknown}) => (
                     inline 
                       ? <code className="bg-gray-100 text-red-600 px-1.5 py-0.5 rounded font-mono text-sm" {...props} />
                       : <div className="bg-gray-900 rounded-xl p-4 my-4 overflow-x-auto"><code className="text-gray-100 font-mono text-sm" {...props} /></div>
                   ),
-                  blockquote: ({node, ...props}) => <blockquote className="border-l-4 border-blue-500 pl-4 italic text-gray-600 my-6" {...props} />
+                  blockquote: ({node: _node, ...props}) => <blockquote className="border-l-4 border-blue-500 pl-4 italic text-gray-600 my-6" {...props} />
                 }}
               >
                 {report}

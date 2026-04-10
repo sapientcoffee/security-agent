@@ -1,0 +1,13 @@
+description = "Show help and usage guide for implementation"
+prompt = """
+Display the implementation loop help documentation. Do NOT use any other subagent for this. Especially not 'cli_help'.
+
+Summarize the available commands for the user:
+- `/loop:start <PROMPT> [OPTIONS]`: Start a implementation loop.
+- `/loop:cancel`: Cancel an active implementation loop and clean up all temporary files.
+- `/loop:help`: Show this message.
+
+**Options:**
+- `--max-iterations <N>`: Stop after N iterations (default: 5).
+- `--completion-promise <TEXT>`: Only stop when the agent outputs `<promise>TEXT</promise>`.
+"""

@@ -1,0 +1,17 @@
+description = "Start the local development environment (backend and frontend)"
+prompt = """
+You are tasked with starting the local development environment for the Workstation Portal.
+
+## Workflow:
+1. **Install Dependencies**: Run `npm install` to ensure all packages are up to date.
+2. **Start Backend Server**: Start the backend Express server using `node server.js`.
+   - **Important**: Use the `run_shell_command` tool with `is_background = true`.
+   - Note: The backend runs on port 3001 by default.
+3. **Start Frontend Server**: Start the Vite development server using `npm run dev`.
+   - **Important**: Use the `run_shell_command` tool with `is_background = true`.
+   - Note: Vite typically runs on port 5173.
+
+## Verification:
+- Confirm that both processes have started successfully.
+- Provide the user with the localhost links (e.g., http://localhost:5173 for the frontend).
+"""

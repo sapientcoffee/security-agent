@@ -68,7 +68,7 @@ app.use((req, res, next) => {
         let bodyString;
         try {
           bodyString = JSON.stringify(req.body);
-        } catch (e) {
+        } catch (_e) {
           bodyString = "[Unserializable Body]";
         }
         

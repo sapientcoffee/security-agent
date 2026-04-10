@@ -21,7 +21,7 @@ const contextFormat = winston.format((info) => {
       info.httpRequest = store.httpRequest;
     }
     // Keep other metadata in reqContext
-    const { requestId, httpRequest, ...rest } = store;
+    const { requestId: _requestId, httpRequest: _httpRequest, ...rest } = store;
     if (Object.keys(rest).length > 0) {
       info.reqContext = rest;
     }

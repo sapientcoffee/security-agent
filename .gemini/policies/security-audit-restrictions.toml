@@ -1,0 +1,34 @@
+# Policy to restrict write_file to the .security-audit/ directory for specific agents
+
+# 1. Allow security-auditor to write to .security-audit/
+[[rule]]
+toolName = "write_file"
+toolAnnotations = { agentName = "security-auditor" }
+argsPattern = '"file_path":\s*"(\./)?\.security-audit/'
+decision = "allow"
+priority = 100
+
+# 2. Allow security-plan to write to .security-audit/
+[[rule]]
+toolName = "write_file"
+toolAnnotations = { agentName = "security-plan" }
+argsPattern = '"file_path":\s*"(\./)?\.security-audit/'
+decision = "allow"
+priority = 100
+
+# 3. Deny security-auditor from writing anywhere else
+[[rule]]
+toolName = "write_file"
+toolAnnotations = { agentName = "security-auditor" }
+decision = "deny"
+priority = 50
+denyMessage = "The security-auditor agent is restricted to writing only in the .security-audit/ directory."
+
+# 4. Deny security-plan from writing anywhere else
+[[rule]]
+toolName = "write_file"
+toolAnnotations = { agentName = "security-plan" }
+decision = "deny"
+priority = 50
+denyMessage = "The security-plan agent is restricted to writing only in the .security-audit/ directory."
+

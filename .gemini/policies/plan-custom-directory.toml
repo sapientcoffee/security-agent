@@ -1,0 +1,17 @@
+# Allow writing plan files in plan mode
+[[rule]]
+toolName = ["write_file", "replace"]
+priority = 100 # prioritize over other extension policies
+decision = "ask_user"
+modes = ["plan"]
+# Allows writing to '.plan/', '.plans/', 'plan/', or 'plans/'
+# Handles optional whitespace, both 'file_path' and 'path' keys, and both relative/absolute paths.
+argsPattern = '''"(?:file_path|path)"\s*:\s*"(?:[^"]*[\\/])?\.?plans?(?:[\\/][^"]*)?"'''
+
+# Allow tools used by conductor to set up conductor dir
+[[rule]]
+toolName = "run_shell_command"
+commandPrefix = ["git status", "git diff", "ls", "mkdir", "cp", "git init", "git add", "git commit"]
+decision = "ask_user"
+priority = 100 # prioritize over other extension policies
+modes = ["plan"]
