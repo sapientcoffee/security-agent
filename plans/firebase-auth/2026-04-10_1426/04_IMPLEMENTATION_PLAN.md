@@ -7,10 +7,10 @@
 - [ ] Phase 2: Backend Authentication
   - [x] Step 2.A: Write Auth Middleware Verification Harness
   - [x] Step 2.B: Implement Firebase Admin Initialization
-  - [x] Step 2.C: Implement Token Verification Middleware
+  - [x] Step 2.C: Implement Token Verification Middleware (Support Firebase + Google Identity tokens)
   - [x] Step 2.D: Secure Core API Endpoints
 - [ ] Phase 3: Frontend State & API
-  - [ ] Step 3.A: Implement Firebase Client Initialization
+  - [x] Step 3.A: Implement Firebase Client Initialization
   - [ ] Step 3.B: Implement Auth Context Provider
   - [ ] Step 3.C: Implement Axios Request Interceptor
 - [ ] Phase 4: Frontend UI
