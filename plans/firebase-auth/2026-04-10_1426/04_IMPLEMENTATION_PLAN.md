@@ -3,7 +3,7 @@
 ## 📋 Micro-Step Checklist
 - [ ] Phase 1: Dependencies & Configuration
   - [x] Step 1.A: Install Frontend Dependencies
-  - [ ] Step 1.B: Install Backend Dependencies
+  - [x] Step 1.B: Install Backend Dependencies
 - [ ] Phase 2: Backend Authentication
   - [ ] Step 2.A: Write Auth Middleware Verification Harness
   - [ ] Step 2.B: Implement Firebase Admin Initialization
