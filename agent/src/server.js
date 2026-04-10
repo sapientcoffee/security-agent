@@ -13,9 +13,11 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import crypto from "crypto";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getAgentCard } from "./agent-card.js";
 import { processGitRepo } from "./git-processor.js";
+import logger, { asyncLocalStorage } from "./utils/logger.js";
 
 dotenv.config();
 
@@ -23,59 +25,87 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
-// Verbose request logging middleware
-app.use((req, res, next) => {
-  const start = Date.now();
-  const requestId = Math.random().toString(36).substring(7);
-  
-  console.log(`\n[${new Date().toISOString()}] [${requestId}] >>> REQUEST ${req.method} ${req.url}`);
-  // Don't log full headers or body for analysis requests to keep logs cleaner
-  if (req.url === '/api/analyze') {
-    console.log(`[${requestId}] Analysis Request (Headers/Body omitted for brevity)`);
-  } else {
-    console.log(`[${requestId}] Headers:`, JSON.stringify(req.headers, null, 2));
-    if (req.method === 'POST' && req.body) {
-      console.log(`[${requestId}] Request Body:`, JSON.stringify(req.body, null, 2));
+// Helper to mask sensitive HTTP headers in logs
+const sanitizeHeaders = (headers) => {
+  const SENSITIVE_HEADERS = ['authorization', 'cookie', 'set-cookie', 'x-api-key'];
+  const sanitized = { ...headers };
+  for (const header of SENSITIVE_HEADERS) {
+    if (sanitized[header]) {
+      sanitized[header] = '[REDACTED]';
     }
   }
+  return sanitized;
+};
 
-  // Capture response body for verbose logging
-  const oldWrite = res.write;
-  const oldEnd = res.end;
-  const chunks = [];
+// Verbose request logging middleware with AsyncLocalStorage for correlation
+app.use((req, res, next) => {
+  const start = Date.now();
+  
+  // Support Google Cloud Trace correlation via X-Cloud-Trace-Context header
+  const traceHeader = req.get('x-cloud-trace-context');
+  const traceIdMatch = traceHeader ? traceHeader.match(/^([a-f0-9]{32})/) : null;
+  const requestId = (traceIdMatch && traceIdMatch[1]) || req.get('x-request-id') || crypto.randomUUID();
 
-  res.write = (...args) => {
-    chunks.push(Buffer.from(args[0]));
-    return oldWrite.apply(res, args);
+  // Standard Google Cloud Logging httpRequest object
+  const httpRequest = {
+    requestMethod: req.method,
+    requestUrl: req.originalUrl || req.url,
+    userAgent: req.get('user-agent'),
+    remoteIp: req.get('x-forwarded-for') || req.socket.remoteAddress,
   };
 
-  res.end = (...args) => {
-    if (args[0]) {
-      chunks.push(Buffer.from(args[0]));
-    }
-    const body = Buffer.concat(chunks).toString('utf8');
-    const duration = Date.now() - start;
+  const context = { requestId, httpRequest };
+  
+  asyncLocalStorage.run(context, () => {
+    logger.info(`>>> REQUEST ${req.method} ${req.url}`);
     
-    console.log(`[${requestId}] <<< RESPONSE Status: ${res.statusCode} (${duration}ms)`);
-    // Only log small response bodies
-    if (body.length < 500) {
-      console.log(`[${requestId}] Response Body:`, body);
+    // Don't log full headers or body for analysis requests to keep logs cleaner
+    if (req.url === '/api/analyze') {
+      logger.debug("Analysis Request (Headers/Body omitted for brevity)");
     } else {
-      console.log(`[${requestId}] Response Body: <OMITTED, length: ${body.length}>`);
+      logger.debug("Request Headers", { headers: sanitizeHeaders(req.headers) });
+      if (req.method === 'POST' && req.body) {
+        let bodyString;
+        try {
+          bodyString = JSON.stringify(req.body);
+        } catch (e) {
+          bodyString = "[Unserializable Body]";
+        }
+        
+        if (bodyString.length > 1000) {
+          logger.debug(`Request Body: <OMITTED, length: ${bodyString.length}>`);
+        } else {
+          logger.debug("Request Body", { body: req.body });
+        }
+      }
     }
-    console.log(`[${new Date().toISOString()}] [${requestId}] END\n`);
-    
-    return oldEnd.apply(res, args);
-  };
 
-  next();
+    // Capture the current context to explicitly re-run in the finish event listener,
+    // ensuring correlation isn't lost during final output.
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      const finalHttpRequest = {
+        ...httpRequest,
+        status: res.statusCode,
+        latency: `${(duration / 1000).toFixed(3)}s`,
+        responseSize: res.get('Content-Length'),
+      };
+
+      asyncLocalStorage.run({ ...context, httpRequest: finalHttpRequest }, () => {
+        logger.info(`<<< RESPONSE Status: ${res.statusCode} (${duration}ms)`);
+      });
+    });
+
+    next();
+  });
 });
+
 
 const PORT = process.env.PORT || 8080;
 const API_KEY = process.env.GOOGLE_API_KEY;
 
 if (!API_KEY) {
-  console.error("[ERROR] Missing GOOGLE_API_KEY environment variable");
+  logger.error("Missing GOOGLE_API_KEY environment variable");
 }
 
 const genAI = new GoogleGenerativeAI(API_KEY);
@@ -86,7 +116,7 @@ app.get("/agent-card", (req, res) => {
   const host = req.get('host');
   const baseUrl = `${protocol}://${host}`;
   
-  console.log(`[DEBUG] Generating agent card with baseUrl: ${baseUrl}`);
+  logger.debug(`Generating agent card with baseUrl: ${baseUrl}`);
   res.json(getAgentCard(baseUrl));
 });
 
@@ -96,7 +126,7 @@ app.post("/api/analyze", async (req, res) => {
     let codeToAnalyze = "";
 
     if (inputType === 'git') {
-      console.log(`[INFO] Processing git repo: ${content}`);
+      logger.info(`Processing git repo: ${content}`, { module: 'git' });
       codeToAnalyze = await processGitRepo(content);
     } else {
       codeToAnalyze = content;
@@ -110,7 +140,7 @@ app.post("/api/analyze", async (req, res) => {
       return res.status(500).json({ error: "GOOGLE_API_KEY is not configured" });
     }
 
-    console.log("[INFO] Calling Google AI Studio for security analysis...");
+    logger.info("Calling Google AI Studio for security analysis...", { module: 'ai' });
 
     const model = genAI.getGenerativeModel({ 
       model: "gemini-3-flash-preview",
@@ -123,7 +153,7 @@ app.post("/api/analyze", async (req, res) => {
 
     res.json({ report });
   } catch (error) {
-    console.error("[ERROR] Analysis error:", error);
+    logger.error("Analysis error", { error: error.message, stack: error.stack });
     res.status(500).json({ error: "Analysis failed", message: error.message });
   }
 });
@@ -142,7 +172,7 @@ app.post("/v1/message:send", async (req, res) => {
     }
     
     if (!input || input === "[object Object]") {
-      console.warn("[WARN] Missing or invalid input content in request body");
+      logger.warn("Missing or invalid input content in request body");
       if (typeof message?.content === 'object' && message.content !== null) {
         input = JSON.stringify(message.content);
       }
@@ -152,7 +182,7 @@ app.post("/v1/message:send", async (req, res) => {
       return res.status(500).json({ error: "GOOGLE_API_KEY is not configured" });
     }
 
-    console.log("[INFO] Calling Google AI Studio with gemini-3-flash-preview...");
+    logger.info("Calling Google AI Studio with gemini-3-flash-preview...", { module: 'ai' });
 
     const model = genAI.getGenerativeModel({ 
       model: "gemini-3-flash-preview",
@@ -177,12 +207,12 @@ app.post("/v1/message:send", async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("[ERROR] Execution error:", error);
+    logger.error("Execution error", { error: error.message, stack: error.stack });
     res.status(500).json({ error: "Internal Server Error", message: error.message, stack: error.stack });
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`Security Audit Agent listening on port ${PORT}`);
+  logger.info(`Security Audit Agent listening on port ${PORT}`);
 });
 
