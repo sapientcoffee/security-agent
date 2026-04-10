@@ -35,7 +35,7 @@ const transports = [];
 // When in production, use the dedicated Cloud Logging transport via API.
 if (process.env.NODE_ENV === 'production') {
   transports.push(new LoggingWinston({
-    prefix: 'security-audit-agent',
+    labels: { service: 'security-audit-agent' },
     logName: 'agent-logs',
   }));
 } else {
