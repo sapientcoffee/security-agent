@@ -5,7 +5,7 @@
   - [x] Step 1.A: Install Frontend Dependencies
   - [x] Step 1.B: Install Backend Dependencies
 - [ ] Phase 2: Backend Authentication
-  - [ ] Step 2.A: Write Auth Middleware Verification Harness
+  - [x] Step 2.A: Write Auth Middleware Verification Harness
   - [ ] Step 2.B: Implement Firebase Admin Initialization
   - [ ] Step 2.C: Implement Token Verification Middleware
   - [ ] Step 2.D: Secure Core API Endpoints
