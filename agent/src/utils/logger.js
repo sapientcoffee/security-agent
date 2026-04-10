@@ -12,8 +12,19 @@ export const asyncLocalStorage = new AsyncLocalStorage();
 const contextFormat = winston.format((info) => {
   const store = asyncLocalStorage.getStore();
   if (store) {
-    // Isolate context in a dedicated namespace to avoid collisions
-    info.reqContext = store;
+    // Map requestId to GCL trace field for better correlation
+    if (store.requestId) {
+      info['logging.googleapis.com/trace'] = store.requestId;
+    }
+    // Support GCL's standard httpRequest object
+    if (store.httpRequest) {
+      info.httpRequest = store.httpRequest;
+    }
+    // Keep other metadata in reqContext
+    const { requestId, httpRequest, ...rest } = store;
+    if (Object.keys(rest).length > 0) {
+      info.reqContext = rest;
+    }
   }
   return info;
 });

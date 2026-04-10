@@ -41,26 +41,47 @@ const sanitizeHeaders = (headers) => {
 app.use((req, res, next) => {
   const start = Date.now();
   const requestId = req.get('x-request-id') || crypto.randomUUID();
-  const context = { requestId, method: req.method, url: req.url };
-  
+
+  // Standard Google Cloud Logging httpRequest object
+  const httpRequest = {
+    requestMethod: req.method,
+    requestUrl: req.originalUrl || req.url,
+    userAgent: req.get('user-agent'),
+    remoteIp: req.get('x-forwarded-for') || req.socket.remoteAddress,
+  };
+
+  const context = { requestId, httpRequest };
+
   asyncLocalStorage.run(context, () => {
     logger.info(`>>> REQUEST ${req.method} ${req.url}`);
-    
+
     // Don't log full headers or body for analysis requests to keep logs cleaner
     if (req.url === '/api/analyze') {
       logger.debug("Analysis Request (Headers/Body omitted for brevity)");
     } else {
       logger.debug("Request Headers", { headers: sanitizeHeaders(req.headers) });
       if (req.method === 'POST' && req.body) {
-        logger.debug("Request Body", { body: req.get('content-length') > 2000 ? '[LARGE BODY OMITTED]' : req.body });
+        const bodyString = JSON.stringify(req.body);
+        if (bodyString.length > 1000) {
+          logger.debug(`Request Body: <OMITTED, length: ${bodyString.length}>`);
+        } else {
+          logger.debug("Request Body", { body: req.body });
+        }
       }
     }
 
     // Capture the current context to explicitly re-run in the finish event listener,
     // ensuring correlation isn't lost during final output.
     res.on('finish', () => {
-      asyncLocalStorage.run(context, () => {
-        const duration = Date.now() - start;
+      const duration = Date.now() - start;
+      const finalHttpRequest = {
+        ...httpRequest,
+        status: res.statusCode,
+        latency: `${(duration / 1000).toFixed(3)}s`,
+        responseSize: res.get('Content-Length'),
+      };
+
+      asyncLocalStorage.run({ ...context, httpRequest: finalHttpRequest }, () => {
         logger.info(`<<< RESPONSE Status: ${res.statusCode} (${duration}ms)`);
       });
     });
@@ -68,6 +89,7 @@ app.use((req, res, next) => {
     next();
   });
 });
+
 
 const PORT = process.env.PORT || 8080;
 const API_KEY = process.env.GOOGLE_API_KEY;
