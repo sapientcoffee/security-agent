@@ -14,7 +14,7 @@ const contextFormat = winston.format((info) => {
   if (store) {
     // Map requestId to GCL trace field for better correlation
     if (store.requestId) {
-      info['logging.googleapis.com/trace'] = store.requestId;
+      info['logging.googleapis.com/trace'] = store.requestId.replace(/-/g, '');
     }
     // Support GCL's standard httpRequest object
     if (store.httpRequest) {
