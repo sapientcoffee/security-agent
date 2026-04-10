@@ -40,7 +40,11 @@ const sanitizeHeaders = (headers) => {
 // Verbose request logging middleware with AsyncLocalStorage for correlation
 app.use((req, res, next) => {
   const start = Date.now();
-  const requestId = req.get('x-request-id') || crypto.randomUUID();
+  
+  // Support Google Cloud Trace correlation via X-Cloud-Trace-Context header
+  const traceHeader = req.get('x-cloud-trace-context');
+  const traceIdMatch = traceHeader ? traceHeader.match(/^([a-f0-9]{32})/) : null;
+  const requestId = (traceIdMatch && traceIdMatch[1]) || req.get('x-request-id') || crypto.randomUUID();
 
   // Standard Google Cloud Logging httpRequest object
   const httpRequest = {
@@ -51,17 +55,23 @@ app.use((req, res, next) => {
   };
 
   const context = { requestId, httpRequest };
-
+  
   asyncLocalStorage.run(context, () => {
     logger.info(`>>> REQUEST ${req.method} ${req.url}`);
-
+    
     // Don't log full headers or body for analysis requests to keep logs cleaner
     if (req.url === '/api/analyze') {
       logger.debug("Analysis Request (Headers/Body omitted for brevity)");
     } else {
       logger.debug("Request Headers", { headers: sanitizeHeaders(req.headers) });
       if (req.method === 'POST' && req.body) {
-        const bodyString = JSON.stringify(req.body);
+        let bodyString;
+        try {
+          bodyString = JSON.stringify(req.body);
+        } catch (e) {
+          bodyString = "[Unserializable Body]";
+        }
+        
         if (bodyString.length > 1000) {
           logger.debug(`Request Body: <OMITTED, length: ${bodyString.length}>`);
         } else {

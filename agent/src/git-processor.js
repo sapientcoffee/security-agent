@@ -78,7 +78,7 @@ export async function processGitRepo(repoUrl) {
 
     return combinedContent;
   } catch (error) {
-    logger.error("Error processing repository", { module: 'git', error: error.message, stack: error.stack });
+    // We re-throw without logging here to avoid duplicate error logs in the server's main handler.
     throw error;
   } finally {
     try {
