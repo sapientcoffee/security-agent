@@ -2,10 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { verifyToken } from '../src/middleware/auth.js';
 import { admin } from '../src/lib/firebase.js';
 
+const verifyIdTokenMock = vi.fn();
 vi.mock('../src/lib/firebase.js', () => ({
   admin: {
     auth: vi.fn(() => ({
-      verifyIdToken: vi.fn()
+      verifyIdToken: verifyIdTokenMock
     }))
   }
 }));
@@ -41,7 +42,6 @@ describe('verifyToken Middleware', () => {
 
   it('should call next with a 401 error if verifyIdToken fails', async () => {
     req.headers.authorization = 'Bearer InvalidToken';
-    const verifyIdTokenMock = admin.auth().verifyIdToken;
     verifyIdTokenMock.mockRejectedValueOnce(new Error('Invalid token'));
     
     await verifyToken(req, res, next);
@@ -53,7 +53,6 @@ describe('verifyToken Middleware', () => {
   it('should attach decoded payload to req.user and call next() on success', async () => {
     req.headers.authorization = 'Bearer ValidToken';
     const decodedToken = { uid: '123', email: 'test@example.com' };
-    const verifyIdTokenMock = admin.auth().verifyIdToken;
     verifyIdTokenMock.mockResolvedValueOnce(decodedToken);
     
     await verifyToken(req, res, next);

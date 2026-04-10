@@ -1,12 +1,28 @@
 import { admin } from '../lib/firebase.js';
-// TODO: import asyncHandler if available or handle natively
+import { asyncHandler } from '../utils/asyncHandler.js';
 
 /**
  * Express middleware to verify Firebase ID token
  * and attach decoded user payload to req.user
  */
-export const verifyToken = async (req, res, next) => {
-  // TODO: Extract token, verify via admin.auth().verifyIdToken()
-  // Throw 401 error using project standard on failure
-  next();
-};
+export const verifyToken = asyncHandler(async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    const error = new Error('Unauthorized: Missing or invalid token format');
+    error.status = 401;
+    throw error;
+  }
+
+  const token = authHeader.split(' ')[1];
+  
+  try {
+    const decodedToken = await admin.auth().verifyIdToken(token);
+    req.user = decodedToken;
+    next();
+  } catch (err) {
+    const error = new Error('Unauthorized: Invalid token');
+    error.status = 401;
+    throw error;
+  }
+});
