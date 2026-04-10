@@ -3,11 +3,12 @@ import cors from "cors";
 import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getAgentCard } from "./agent-card.js";
+import { processGitRepo } from "./git-processor.js";
 
 dotenv.config();
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
 // Verbose request logging middleware
@@ -16,10 +17,14 @@ app.use((req, res, next) => {
   const requestId = Math.random().toString(36).substring(7);
   
   console.log(`\n[${new Date().toISOString()}] [${requestId}] >>> REQUEST ${req.method} ${req.url}`);
-  console.log(`[${requestId}] Headers:`, JSON.stringify(req.headers, null, 2));
-  
-  if (req.method === 'POST' && req.body) {
-    console.log(`[${requestId}] Request Body:`, JSON.stringify(req.body, null, 2));
+  // Don't log full headers or body for analysis requests to keep logs cleaner
+  if (req.url === '/api/analyze') {
+    console.log(`[${requestId}] Analysis Request (Headers/Body omitted for brevity)`);
+  } else {
+    console.log(`[${requestId}] Headers:`, JSON.stringify(req.headers, null, 2));
+    if (req.method === 'POST' && req.body) {
+      console.log(`[${requestId}] Request Body:`, JSON.stringify(req.body, null, 2));
+    }
   }
 
   // Capture response body for verbose logging
@@ -40,7 +45,12 @@ app.use((req, res, next) => {
     const duration = Date.now() - start;
     
     console.log(`[${requestId}] <<< RESPONSE Status: ${res.statusCode} (${duration}ms)`);
-    console.log(`[${requestId}] Response Body:`, body);
+    // Only log small response bodies
+    if (body.length < 500) {
+      console.log(`[${requestId}] Response Body:`, body);
+    } else {
+      console.log(`[${requestId}] Response Body: <OMITTED, length: ${body.length}>`);
+    }
     console.log(`[${new Date().toISOString()}] [${requestId}] END\n`);
     
     return oldEnd.apply(res, args);
@@ -66,6 +76,44 @@ app.get("/agent-card", (req, res) => {
   
   console.log(`[DEBUG] Generating agent card with baseUrl: ${baseUrl}`);
   res.json(getAgentCard(baseUrl));
+});
+
+app.post("/api/analyze", async (req, res) => {
+  try {
+    const { inputType, content } = req.body;
+    let codeToAnalyze = "";
+
+    if (inputType === 'git') {
+      console.log(`[INFO] Processing git repo: ${content}`);
+      codeToAnalyze = await processGitRepo(content);
+    } else {
+      codeToAnalyze = content;
+    }
+
+    if (!codeToAnalyze) {
+      return res.status(400).json({ error: "No code provided for analysis" });
+    }
+
+    if (!API_KEY) {
+      return res.status(500).json({ error: "GOOGLE_API_KEY is not configured" });
+    }
+
+    console.log("[INFO] Calling Google AI Studio for security analysis...");
+
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-3-flash-preview",
+      systemInstruction: "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown."
+    });
+
+    const result = await model.generateContent(codeToAnalyze);
+    const response = await result.response;
+    const report = response.text();
+
+    res.json({ report });
+  } catch (error) {
+    console.error("[ERROR] Analysis error:", error);
+    res.status(500).json({ error: "Analysis failed", message: error.message });
+  }
 });
 
 app.post("/v1/message:send", async (req, res) => {

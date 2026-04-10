@@ -34,6 +34,29 @@ This is a remote subagent for Gemini CLI that performs security audits and QA ch
     ---
     ```
 
+## API Endpoints
+
+- **`POST /api/analyze`**: Performs a security analysis on the provided code or Git repository.
+  - **Payload**: `{ "inputType": "text" | "git", "content": string }`
+  - **Response**: `{ "report": string }` (Markdown-formatted audit report).
+- **`GET /agent-card`**: Returns the remote agent configuration for Gemini CLI.
+- **`POST /v1/message:send`**: Generic agent message endpoint.
+
+## Architecture & Features
+
+### Git Processing
+The agent uses `simple-git` and `glob` to:
+1.  **Clone**: Repositories are cloned into a temporary system directory (`os.tmpdir()`).
+2.  **Filter**: It automatically ignores binary files, dependencies (`node_modules`), and version control metadata (`.git`).
+3.  **Analyze**: All discovered source code files are aggregated into a single context-rich string for analysis by the Gemini model.
+4.  **Cleanup**: The temporary directory is recursively deleted after analysis, even in the case of failures.
+
+### AI Integration
+The agent is configured to use **Gemini 1.5 Flash** with a specialized system instruction that defines its persona as a "Specialized QA and Security Engineer." This instruction guides the model to perform:
+- Functional Assessment
+- Bug Hunting
+- Detailed Security Audits
+
 ## Local Development
 
 1.  Install dependencies:
