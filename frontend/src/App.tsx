@@ -14,9 +14,12 @@ import { useState, useRef } from 'react';
 import axios from 'axios';
 import apiClient from './api/axios';
 import ReactMarkdown from 'react-markdown';
-import { Shield, Code, Github, FileUp, Loader2, Send, AlertTriangle } from 'lucide-react';
+import { Shield, Code, Github, FileUp, Loader2, Send, AlertTriangle, LogOut } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { useAuth } from './contexts/AuthContext';
+import { Login } from './components/Login';
+import { auth as firebaseAuth } from './firebaseConfig';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -25,10 +28,11 @@ function cn(...inputs: ClassValue[]) {
 type InputType = 'text' | 'git' | 'file';
 
 export default function App() {
+  const { user, loading } = useAuth();
   const [inputType, setInputType] = useState<InputType>('text');
   const [content, setContent] = useState('');
   const [report, setReport] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,7 +54,7 @@ export default function App() {
       return;
     }
 
-    setLoading(true);
+    setIsAnalyzing(true);
     setError(null);
     setReport(null);
 
@@ -68,9 +72,21 @@ export default function App() {
         setError(err instanceof Error ? err.message : 'An unexpected error occurred during analysis.');
       }
     } finally {
-      setLoading(false);
+      setIsAnalyzing(false);
     }
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <Loader2 className="animate-spin text-blue-600" size={48} />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Login />;
+  }
 
   const TabButton = ({ type, icon: Icon, label }: { type: InputType; icon: React.ElementType; label: string }) => (
     <button
@@ -94,6 +110,15 @@ export default function App() {
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-blue-100 w-full flex flex-col items-center py-12 px-4">
       <div className="max-w-4xl w-full space-y-8">
+        <div className="flex justify-end">
+          <button
+            onClick={() => firebaseAuth.signOut()}
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors"
+          >
+            <LogOut size={18} />
+            Sign Out
+          </button>
+        </div>
         {/* Header */}
         <header className="text-center space-y-4">
           <div className="inline-flex items-center justify-center p-3 bg-blue-100 text-blue-600 rounded-2xl mb-2">
@@ -186,15 +211,15 @@ export default function App() {
             {/* Submit Button */}
             <button
               onClick={handleAnalyze}
-              disabled={loading || !content.trim()}
+              disabled={isAnalyzing || !content.trim()}
               className={cn(
                 "w-full py-4 rounded-xl font-bold text-lg flex items-center justify-center gap-3 transition-all transform active:scale-[0.98]",
-                loading || !content.trim()
+                isAnalyzing || !content.trim()
                   ? "bg-gray-300 cursor-not-allowed text-gray-500"
                   : "bg-blue-600 text-white hover:bg-blue-700 shadow-lg shadow-blue-200"
               )}
             >
-              {loading ? (
+              {isAnalyzing ? (
                 <>
                   <Loader2 className="animate-spin" />
                   Analyzing Security...
