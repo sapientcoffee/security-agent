@@ -18,6 +18,7 @@ import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getAgentCard } from "./agent-card.js";
 import { processGitRepo } from "./git-processor.js";
 import logger, { asyncLocalStorage } from "./utils/logger.js";
+import { verifyToken } from "./middleware/auth.js";
 
 dotenv.config();
 
@@ -110,7 +111,7 @@ if (!API_KEY) {
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-app.get("/agent-card", (req, res) => {
+app.get("/agent-card", verifyToken, (req, res) => {
   // Construct absolute base URL, ensuring HTTPS if behind a proxy like Cloud Run
   const protocol = req.get('x-forwarded-proto') || req.protocol;
   const host = req.get('host');
@@ -120,7 +121,7 @@ app.get("/agent-card", (req, res) => {
   res.json(getAgentCard(baseUrl));
 });
 
-app.post("/api/analyze", async (req, res) => {
+app.post("/api/analyze", verifyToken, async (req, res) => {
   try {
     const { inputType, content } = req.body;
     let codeToAnalyze = "";
@@ -158,7 +159,7 @@ app.post("/api/analyze", async (req, res) => {
   }
 });
 
-app.post("/v1/message:send", async (req, res) => {
+app.post("/v1/message:send", verifyToken, async (req, res) => {
   try {
     const { message, text } = req.body;
     let input = "";
@@ -212,7 +213,15 @@ app.post("/v1/message:send", async (req, res) => {
   }
 });
 
+// Global Error Handler Middleware
+app.use((err, req, res, next) => {
+  logger.error(err.message || 'Internal Server Error', { error: err.message, stack: err.stack });
+  const status = err.status || 500;
+  res.status(status).json({
+    error: err.message || 'Internal Server Error'
+  });
+});
+
 app.listen(PORT, () => {
   logger.info(`Security Audit Agent listening on port ${PORT}`);
 });
-

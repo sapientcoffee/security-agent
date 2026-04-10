@@ -8,7 +8,7 @@
   - [x] Step 2.A: Write Auth Middleware Verification Harness
   - [x] Step 2.B: Implement Firebase Admin Initialization
   - [x] Step 2.C: Implement Token Verification Middleware
-  - [ ] Step 2.D: Secure Core API Endpoints
+  - [x] Step 2.D: Secure Core API Endpoints
 - [ ] Phase 3: Frontend State & API
   - [ ] Step 3.A: Implement Firebase Client Initialization
   - [ ] Step 3.B: Implement Auth Context Provider
