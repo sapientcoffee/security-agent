@@ -12,8 +12,8 @@ export const asyncLocalStorage = new AsyncLocalStorage();
 const contextFormat = winston.format((info) => {
   const store = asyncLocalStorage.getStore();
   if (store) {
-    // Merge context from store into the log info object
-    return Object.assign(info, store);
+    // Isolate context in a dedicated namespace to avoid collisions
+    info.reqContext = store;
   }
   return info;
 });

@@ -24,6 +24,18 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
 
+// Helper to mask sensitive HTTP headers in logs
+const sanitizeHeaders = (headers) => {
+  const SENSITIVE_HEADERS = ['authorization', 'cookie', 'set-cookie', 'x-api-key'];
+  const sanitized = { ...headers };
+  for (const header of SENSITIVE_HEADERS) {
+    if (sanitized[header]) {
+      sanitized[header] = '[REDACTED]';
+    }
+  }
+  return sanitized;
+};
+
 // Verbose request logging middleware with AsyncLocalStorage for correlation
 app.use((req, res, next) => {
   const start = Date.now();
@@ -36,45 +48,17 @@ app.use((req, res, next) => {
     if (req.url === '/api/analyze') {
       logger.debug("Analysis Request (Headers/Body omitted for brevity)");
     } else {
-      logger.debug("Request Headers", { headers: req.headers });
+      logger.debug("Request Headers", { headers: sanitizeHeaders(req.headers) });
       if (req.method === 'POST' && req.body) {
         logger.debug("Request Body", { body: req.body });
       }
     }
 
-    // Capture response body for verbose logging
-    const oldWrite = res.write;
-    const oldEnd = res.end;
-    const chunks = [];
-
-    res.write = (...args) => {
-      chunks.push(Buffer.from(args[0]));
-      return oldWrite.apply(res, args);
-    };
-
-    res.end = (...args) => {
-      if (args[0]) {
-        chunks.push(Buffer.from(args[0]));
-      }
-      const body = Buffer.concat(chunks).toString('utf8');
+    // Use 'finish' event to log completion without buffering the entire response body
+    res.on('finish', () => {
       const duration = Date.now() - start;
-      
       logger.info(`<<< RESPONSE Status: ${res.statusCode} (${duration}ms)`);
-      
-      // Only log small response bodies
-      if (body.length < 500) {
-        try {
-          const jsonBody = JSON.parse(body);
-          logger.debug("Response Body", { body: jsonBody });
-        } catch (e) {
-          logger.debug("Response Body", { body });
-        }
-      } else {
-        logger.debug(`Response Body: <OMITTED, length: ${body.length}>`);
-      }
-      
-      return oldEnd.apply(res, args);
-    };
+    });
 
     next();
   });
