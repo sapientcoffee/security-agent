@@ -29,18 +29,16 @@ if (process.env.NODE_ENV === 'production') {
   }));
 } else {
   // Console transport for local/development/test environments
-  transports.push(new winston.transports.Console({
-    format: winston.format.combine(
-      contextFormat(),
-      winston.format.timestamp(),
-      winston.format.json()
-    ),
-  }));
+  transports.push(new winston.transports.Console());
 }
 
 const logger = winston.createLogger({
   level: process.env.LOG_LEVEL || 'info',
-  format: contextFormat(),
+  format: winston.format.combine(
+    contextFormat(),
+    winston.format.timestamp(),
+    winston.format.json()
+  ),
   transports,
 });
 
