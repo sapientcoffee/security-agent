@@ -15,6 +15,7 @@ import { glob } from 'glob';
 import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
+import logger from './utils/logger.js';
 
 /**
  * Clones a git repository into a temporary directory,
@@ -26,7 +27,7 @@ export async function processGitRepo(repoUrl) {
   const git = simpleGit();
 
   try {
-    console.log(`[GIT] Cloning repository: ${repoUrl} into ${tempDir}`);
+    logger.info(`Cloning repository: ${repoUrl} into ${tempDir}`, { module: 'git' });
     await git.clone(repoUrl, tempDir, ['--depth', '1']);
 
     // Common patterns to ignore to save context
@@ -56,14 +57,14 @@ export async function processGitRepo(repoUrl) {
       absolute: true
     });
 
-    console.log(`[GIT] Found ${files.length} relevant files for analysis.`);
+    logger.info(`Found ${files.length} relevant files for analysis.`, { module: 'git' });
 
     let combinedContent = "";
     for (const file of files) {
       const stats = await fs.stat(file);
       // Skip files larger than 50KB to prevent context bloat
       if (stats.size > 50000) {
-        console.warn(`[GIT] Skipping large file: ${path.relative(tempDir, file)} (${stats.size} bytes)`);
+        logger.warn(`Skipping large file: ${path.relative(tempDir, file)} (${stats.size} bytes)`, { module: 'git' });
         continue;
       }
 
@@ -77,14 +78,14 @@ export async function processGitRepo(repoUrl) {
 
     return combinedContent;
   } catch (error) {
-    console.error(`[GIT] Error processing repository:`, error);
+    logger.error("Error processing repository", { module: 'git', error: error.message, stack: error.stack });
     throw error;
   } finally {
     try {
-      console.log(`[GIT] Cleaning up temporary directory: ${tempDir}`);
+      logger.info(`Cleaning up temporary directory: ${tempDir}`, { module: 'git' });
       await fs.rm(tempDir, { recursive: true, force: true });
     } catch (cleanupError) {
-      console.error(`[GIT] Cleanup error:`, cleanupError);
+      logger.error("Cleanup error", { module: 'git', error: cleanupError.message, stack: cleanupError.stack });
     }
   }
 }
