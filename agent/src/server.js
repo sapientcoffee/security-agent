@@ -52,7 +52,7 @@ app.use((req, res, next) => {
     } else {
       logger.debug("Request Headers", { headers: sanitizeHeaders(req.headers) });
       if (req.method === 'POST' && req.body) {
-        logger.debug("Request Body", { body: req.body });
+        logger.debug("Request Body", { body: req.get('content-length') > 2000 ? '[LARGE BODY OMITTED]' : req.body });
       }
     }
 
