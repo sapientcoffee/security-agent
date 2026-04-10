@@ -18,21 +18,23 @@ const contextFormat = winston.format((info) => {
   return info;
 });
 
-const transports = [
-  new winston.transports.Console({
+const transports = [];
+
+// Avoid duplicate logs in Cloud Logging (stdout is already ingested as text)
+// When in production, use the dedicated Cloud Logging transport via API.
+if (process.env.NODE_ENV === 'production') {
+  transports.push(new LoggingWinston({
+    prefix: 'security-audit-agent',
+    logName: 'agent-logs',
+  }));
+} else {
+  // Console transport for local/development/test environments
+  transports.push(new winston.transports.Console({
     format: winston.format.combine(
       contextFormat(),
       winston.format.timestamp(),
       winston.format.json()
     ),
-  }),
-];
-
-// Add Google Cloud Logging transport if not in development or if specifically requested
-if (process.env.NODE_ENV === 'production') {
-  transports.push(new LoggingWinston({
-    prefix: 'security-audit-agent',
-    logName: 'agent-logs',
   }));
 }
 

@@ -13,6 +13,7 @@
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
+import crypto from "crypto";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getAgentCard } from "./agent-card.js";
 import { processGitRepo } from "./git-processor.js";
@@ -39,9 +40,10 @@ const sanitizeHeaders = (headers) => {
 // Verbose request logging middleware with AsyncLocalStorage for correlation
 app.use((req, res, next) => {
   const start = Date.now();
-  const requestId = req.get('x-request-id') || Math.random().toString(36).substring(7);
+  const requestId = req.get('x-request-id') || crypto.randomUUID();
+  const context = { requestId, method: req.method, url: req.url };
   
-  asyncLocalStorage.run({ requestId, method: req.method, url: req.url }, () => {
+  asyncLocalStorage.run(context, () => {
     logger.info(`>>> REQUEST ${req.method} ${req.url}`);
     
     // Don't log full headers or body for analysis requests to keep logs cleaner
@@ -54,10 +56,13 @@ app.use((req, res, next) => {
       }
     }
 
-    // Use 'finish' event to log completion without buffering the entire response body
+    // Capture the current context to explicitly re-run in the finish event listener,
+    // ensuring correlation isn't lost during final output.
     res.on('finish', () => {
-      const duration = Date.now() - start;
-      logger.info(`<<< RESPONSE Status: ${res.statusCode} (${duration}ms)`);
+      asyncLocalStorage.run(context, () => {
+        const duration = Date.now() - start;
+        logger.info(`<<< RESPONSE Status: ${res.statusCode} (${duration}ms)`);
+      });
     });
 
     next();
