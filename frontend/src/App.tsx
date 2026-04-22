@@ -85,6 +85,18 @@ export default function App() {
   }
 
   if (!user) {
+    const isBypassEnabled = import.meta.env.VITE_ENABLE_AUTH_BYPASS === 'true';
+    if (isBypassEnabled) {
+      return (
+        <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+          <div className="text-center p-8 bg-white rounded-2xl shadow-lg border border-gray-100">
+            <Shield className="mx-auto text-blue-600 mb-4" size={48} />
+            <h1 className="text-2xl font-bold mb-2">Auth Required</h1>
+            <p className="text-gray-500">Please set <code>E2E_BYPASS_TOKEN</code> in localStorage to continue.</p>
+          </div>
+        </div>
+      );
+    }
     return <Login />;
   }
 

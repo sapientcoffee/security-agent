@@ -45,7 +45,7 @@ This file describes common mistakes and confusion points that agents might encou
 | :--- | :--- | :--- |
 | **Error Handling** | Use `asyncHandler` in `server.js` and throw errors with a `.status` property. | Never use generic `try/catch` blocks that swallow errors or omit status codes. |
 | **SDK Usage** | Always use `@google-cloud/workstations` client via `getUserScopedClient(req)`. | Do not instantiate the client manually without proper user-scoped auth. |
-| **Testing** | Use the Service Account Token Injection Bypass for E2E tests. | Never attempt to automate login through the Google UI or Firebase emulators. |
+| **Testing** | Use the Service Account Token Injection Bypass for E2E tests. Requires `VITE_ENABLE_AUTH_BYPASS="true"` and `localStorage` injection. | Never attempt to automate login through the Google UI or Firebase emulators. |
 | **Commits** | Use format: `feat(<feature-name>): <task summary>` | Committing without running `npm run lint` and `npm run test:e2e`. |
 | **Comments** | Never remove a comment unless it is specific to the changes you are making. | Deleting original comments or instructions while refactoring. |
 | **Deployment** | Always use `gcloud builds submit` with substitutions for the frontend to ensure env vars are baked in. | Never deploy the frontend from source using `gcloud run deploy --source` as build-args will be ignored. |

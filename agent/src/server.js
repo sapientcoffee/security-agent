@@ -111,7 +111,7 @@ if (!API_KEY) {
 
 const genAI = new GoogleGenerativeAI(API_KEY);
 
-app.get("/agent-card", verifyToken, (req, res) => {
+app.get("/agent-card", (req, res) => {
   // Construct absolute base URL, ensuring HTTPS if behind a proxy like Cloud Run
   const protocol = req.get('x-forwarded-proto') || req.protocol;
   const host = req.get('host');
@@ -198,7 +198,7 @@ app.post("/v1/message:send", verifyToken, async (req, res) => {
     // Finalized A2A compliant response schema for Gemini CLI
     res.json({ 
       message: {
-        messageId: req.body.message?.messageId || Math.random().toString(36).substring(7),
+        messageId: crypto.randomUUID(),
         role: "ROLE_AGENT",
         content: [
           {
@@ -209,7 +209,7 @@ app.post("/v1/message:send", verifyToken, async (req, res) => {
     });
   } catch (error) {
     logger.error("Execution error", { error: error.message, stack: error.stack });
-    res.status(500).json({ error: "Internal Server Error", message: error.message, stack: error.stack });
+    res.status(500).json({ error: "Internal Server Error", message: error.message });
   }
 });
 

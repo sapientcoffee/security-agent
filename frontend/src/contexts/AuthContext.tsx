@@ -14,6 +14,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Check for E2E bypass token (only enabled in dev/test)
+    const isBypassEnabled = import.meta.env.VITE_ENABLE_AUTH_BYPASS === 'true';
+    const bypassToken = localStorage.getItem('E2E_BYPASS_TOKEN');
+    
+    if (isBypassEnabled && bypassToken) {
+      setUser({
+        uid: 'e2e-bypass-user',
+        email: 'e2e@example.com',
+        displayName: 'E2E Bypass User',
+        getIdToken: async () => bypassToken,
+      } as any);
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
       setUser(currentUser);
       setLoading(false);

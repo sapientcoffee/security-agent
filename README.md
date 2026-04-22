@@ -48,5 +48,13 @@ npm run dev
 ```
 Open the provided URL (usually `http://localhost:5173`) in your browser.
 
+### 3. Local Auth Bypass (Development & Testing)
+To bypass the Firebase login screen during local development:
+1. In `frontend/.env`, set `VITE_ENABLE_AUTH_BYPASS="true"`.
+2. Open your browser's console on `http://localhost:5173`.
+3. Run: `localStorage.setItem('E2E_BYPASS_TOKEN', '<your-identity-token>')`. 
+   *(You can get a token via `gcloud auth print-identity-token`)*.
+4. Refresh the page.
+
 ## 🔒 Security Note
 This tool is for audit and educational purposes. Ensure you have permission to audit any code or repository you submit to the service.

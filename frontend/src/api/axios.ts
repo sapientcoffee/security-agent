@@ -7,8 +7,18 @@ const apiClient = axios.create({
 
 apiClient.interceptors.request.use(
   async (config) => {
+    let token = null;
+    const isBypassEnabled = import.meta.env.VITE_ENABLE_AUTH_BYPASS === 'true';
+    
+    if (isBypassEnabled) {
+      token = localStorage.getItem('E2E_BYPASS_TOKEN');
+    }
+    
     if (auth.currentUser) {
-      const token = await auth.currentUser.getIdToken();
+      token = await auth.currentUser.getIdToken();
+    }
+    
+    if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
     return config;
