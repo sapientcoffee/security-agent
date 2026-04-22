@@ -11,9 +11,14 @@ An LLM will perform better on a task when its' context window is full of focused
 * Include unique instructions or team etiquette (branch naming, PR conventions)
 * Consider what the model can workout and what it can't (and will) work out by reviewing the codebase; reduce the risk of confusing it -->
 
-# Project: Workstation Portal
+# Project: Security Audit Agent
 <!-- agents operate best on rigid, operational guardrails and specific constraints rather than polite requests or general guidelines. Stick to concrete "Do X, Never do Y" statements. -->
-This file describes common mistakes and confusion points that agents might encounter as they work in this project. If you ever encounter something in the project that surprises you please alert the developer working with you and indicate that this is the case in GEMINI.MD file to help prevent future agents from having the same issue
+This file describes common mistakes and confusion points that agents might encounter as they work in this project.
+
+## Deployment Workflow
+- **Backend (Agent):** Deploy first to obtain URL. Use `gcloud run deploy security-audit-agent --source ./agent --set-env-vars GOOGLE_API_KEY=...`
+- **Frontend (UI):** Must be built using `gcloud builds submit` to ensure build-time arguments (VITE_API_URL, Firebase config) are baked into the image. Use the `frontend/cloudbuild.yaml`.
+- **CORS:** Ensure `app.use(cors())` is present in `agent/src/server.js` to allow the frontend to communicate with the backend across different Cloud Run URLs.
 
 ## Setup & Developer Environment
 <!-- Gemini will work out dependencies from the codebase (e.g. package.json). Hardcoding in here is like having stale docs -->
@@ -43,3 +48,4 @@ This file describes common mistakes and confusion points that agents might encou
 | **Testing** | Use the Service Account Token Injection Bypass for E2E tests. | Never attempt to automate login through the Google UI or Firebase emulators. |
 | **Commits** | Use format: `feat(<feature-name>): <task summary>` | Committing without running `npm run lint` and `npm run test:e2e`. |
 | **Comments** | Never remove a comment unless it is specific to the changes you are making. | Deleting original comments or instructions while refactoring. |
+| **Deployment** | Always use `gcloud builds submit` with substitutions for the frontend to ensure env vars are baked in. | Never deploy the frontend from source using `gcloud run deploy --source` as build-args will be ignored. |

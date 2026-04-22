@@ -31,7 +31,6 @@ export const Login: React.FC = () => {
         </div>
 
         <div className="py-4">
-          {/* @ts-ignore - react-firebaseui has type issues with React 18 */}
           <StyledFirebaseAuth uiConfig={uiConfig} firebaseAuth={auth} />
         </div>
 
