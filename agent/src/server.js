@@ -123,7 +123,7 @@ app.get("/agent-card", (req, res) => {
 
 app.post("/api/analyze", verifyToken, async (req, res) => {
   try {
-    const { inputType, content } = req.body;
+    const { inputType, content, structured } = req.body;
     let codeToAnalyze = "";
 
     if (inputType === 'git') {
@@ -141,18 +141,51 @@ app.post("/api/analyze", verifyToken, async (req, res) => {
       return res.status(500).json({ error: "GOOGLE_API_KEY is not configured" });
     }
 
-    logger.info("Calling Google AI Studio for security analysis...", { module: 'ai' });
+    logger.info("Calling Google AI Studio for security analysis...", { module: 'ai', structured });
+
+    let systemInstruction = "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.";
+    let generationConfig = {};
+
+    if (structured) {
+      systemInstruction = `You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. 
+      Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 
+      Output Format: You MUST return a JSON object with the following schema:
+      {
+        "summary": "High-level markdown summary of the findings",
+        "comments": [
+          {
+            "path": "file path",
+            "line": line number (integer),
+            "body": "markdown comment about the specific line"
+          }
+        ]
+      }`;
+      generationConfig = {
+        responseMimeType: "application/json",
+      };
+    }
 
     const model = genAI.getGenerativeModel({ 
       model: "gemini-3-flash-preview",
-      systemInstruction: "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown."
+      systemInstruction,
+      generationConfig
     });
 
     const result = await model.generateContent(codeToAnalyze);
     const response = await result.response;
-    const report = response.text();
+    const output = response.text();
 
-    res.json({ report });
+    if (structured) {
+      try {
+        const parsed = JSON.parse(output);
+        return res.json(parsed);
+      } catch (e) {
+        logger.error("Failed to parse structured output from AI", { output });
+        return res.status(500).json({ error: "Failed to generate structured output" });
+      }
+    }
+
+    res.json({ report: output });
   } catch (error) {
     logger.error("Analysis error", { error: error.message, stack: error.stack });
     res.status(500).json({ error: "Analysis failed", message: error.message });
