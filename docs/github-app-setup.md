@@ -1,26 +1,23 @@
 # GitHub App Setup Guide
 
-This guide provides step-by-step instructions for obtaining the credentials required to run the GitHub Security Review Bot.
+This guide provides two ways to setup your GitHub App: the **Automated "One-Click" Method** (Recommended) and the **Manual Method**.
 
-## 1. Create the GitHub App
+## 🚀 1. Automated Setup (Recommended)
 
-1.  **Navigate to GitHub Apps:** Go to your GitHub Profile -> **Settings** -> **Developer settings** -> **GitHub Apps**.
-2.  **Create New App:** Click **New GitHub App**.
-    *   **GitHub App name:** e.g., `Security-Audit-Bot-[YourName]`.
-    *   **Homepage URL:** Your project's repository URL.
-3.  **Webhook Settings:**
-    *   **Webhook:** Check the "Active" box.
-    *   **Webhook URL:** 
-        *   For **Local Dev**: Use a proxy URL (e.g., from `smee.io`).
-        *   For **Cloud**: Use your Cloud Run service URL (e.g., `https://github-security-bot-...run.app/api/webhook`).
-    *   **Webhook secret:** Enter a secure random string. **Store this as `GITHUB_WEBHOOK_SECRET`.**
-4.  **Permissions:**
-    *   **Repository permissions** -> **Contents**: `Read-only` (to fetch code).
-    *   **Repository permissions** -> **Pull requests**: `Read & write` (to post reviews).
-    *   **Repository permissions** -> **Metadata**: `Read-only` (default).
-5.  **Subscribe to events:**
-    *   Check **Pull request** (under the "Permissions and events" section).
-6.  **Create:** Click **Create GitHub App**.
+GitHub supports "Manifests" which allow you to pre-configure an app with one click.
+
+1.  **Open the Generator:** Locate the `github-bot/create-app.html` file in this repository.
+2.  **Open in Browser:** Open this file in your web browser.
+3.  **Click "Create GitHub App":** This will redirect you to GitHub with all permissions and events pre-selected.
+4.  **Finalize:** GitHub will ask you to name the app and provide a webhook secret.
+5.  **Download Key:** After creation, GitHub will redirect you back, and you will be prompted to generate and download your private key.
+
+---
+
+## 2. Manual Setup (Alternative)
+
+If the automated method doesn't work for you, follow these steps:
+...
 
 ## 2. Obtain Credentials
 
