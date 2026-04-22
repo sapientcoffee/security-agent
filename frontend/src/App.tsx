@@ -19,6 +19,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useAuth } from './contexts/AuthContext';
 import { Login } from './components/Login';
+import { GitHubSetup } from './components/GitHubSetup';
 import { auth as firebaseAuth } from './firebaseConfig';
 
 function cn(...inputs: ClassValue[]) {
@@ -144,6 +145,9 @@ export default function App() {
             Powered by Gemini 3.1 Flash.
           </p>
         </header>
+
+        {/* GitHub Setup Section */}
+        <GitHubSetup />
 
         {/* Main Interface */}
         <main className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">

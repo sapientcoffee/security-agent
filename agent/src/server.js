@@ -19,9 +19,12 @@ import { getAgentCard } from "./agent-card.js";
 import { processGitRepo } from "./git-processor.js";
 import logger, { asyncLocalStorage } from "./utils/logger.js";
 import { verifyToken } from "./middleware/auth.js";
+import { admin } from "./lib/firebase.js";
+import { asyncHandler } from "./utils/asyncHandler.js";
 
 dotenv.config();
 
+const db = admin.firestore();
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 app.use(cors());
@@ -241,6 +244,65 @@ app.post("/v1/message:send", verifyToken, asyncHandler(async (req, res) => {
         }
       ]
     }
+  });
+}));
+
+/**
+ * Exchange GitHub App Manifest code for credentials and store them in Firestore.
+ */
+app.post("/api/github/finalize-setup", verifyToken, asyncHandler(async (req, res) => {
+  const { code } = req.body;
+  const uid = req.user.uid;
+
+  if (!code) {
+    const error = new Error('Missing code parameter');
+    error.status = 400;
+    throw error;
+  }
+
+  logger.info(`Finalizing GitHub setup for user ${uid}...`);
+
+  // Exchange the code for the app configuration
+  const githubResponse = await fetch(`https://api.github.com/app-manifests/${code}/conversions`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/vnd.github+json'
+    }
+  });
+
+  if (!githubResponse.ok) {
+    const errorData = await githubResponse.text();
+    logger.error('GitHub API error during code conversion', { status: githubResponse.status, error: errorData });
+    const error = new Error(`GitHub API error: ${githubResponse.status}`);
+    error.status = 502;
+    throw error;
+  }
+
+  const appConfig = await githubResponse.json();
+  
+  const githubData = {
+    appId: appConfig.id.toString(),
+    webhookSecret: appConfig.webhook_secret,
+    privateKey: appConfig.pem,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    ownerUid: uid,
+    htmlUrl: appConfig.html_url
+  };
+
+  // Store by appId for fast lookup during webhooks, and link to uid
+  await db.collection('github_apps').doc(githubData.appId).set(githubData);
+  
+  // Also store reference in user document
+  await db.collection('users').doc(uid).set({
+    githubAppId: githubData.appId
+  }, { merge: true });
+
+  logger.info(`Successfully stored GitHub App ${githubData.appId} for user ${uid}`);
+
+  res.json({ 
+    success: true, 
+    appId: githubData.appId,
+    installUrl: `${appConfig.html_url}/installations/new`
   });
 }));
 

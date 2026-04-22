@@ -10,6 +10,7 @@ import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleAuth } from 'google-auth-library';
+import { db } from './lib/firebase.js';
 import { GitHubService } from './github-service.js';
 import { analyzeDiff } from './agent-client.js';
 import { asyncHandler } from './utils/asyncHandler.js';
@@ -17,11 +18,24 @@ import { asyncHandler } from './utils/asyncHandler.js';
 // Load environment variables
 dotenv.config();
 
+console.info('>>> GitHub Security Bot Starting...');
+
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Helper to retrieve GitHub App config from Firestore
+async function getAppConfig(appId) {
+  if (!appId) return null;
+  const doc = await db.collection('github_apps').doc(appId.toString()).get();
+  if (!doc.exists) {
+    console.error(`>>> No configuration found for App ID: ${appId}`);
+    return null;
+  }
+  return doc.data();
+}
 
 // Function to update Cloud Run environment variables
 async function updateCloudRunConfig(newEnv) {
@@ -39,10 +53,8 @@ async function updateCloudRunConfig(newEnv) {
   const service = getResponse.data;
 
   // 2. Prepare new environment variables
-  // Map newEnv object to Cloud Run env array format
   const newEnvArray = Object.entries(newEnv).map(([name, value]) => ({ name, value }));
   
-  // Merge with existing env, preferring new values
   const currentEnv = service.template.containers[0].env || [];
   const updatedEnv = [...currentEnv];
   
@@ -58,7 +70,6 @@ async function updateCloudRunConfig(newEnv) {
   // 3. Update the service
   service.template.containers[0].env = updatedEnv;
   
-  // We must remove some fields that GitHub doesn't like in a PATCH request for the V2 API
   delete service.status;
   delete service.uri;
   delete service.reconciling;
@@ -71,7 +82,7 @@ async function updateCloudRunConfig(newEnv) {
   delete service.creator;
   delete service.lastModifier;
 
-  console.log(`Updating Cloud Run service ${serviceName} with new credentials...`);
+  console.info(`>>> Updating Cloud Run service ${serviceName} with new credentials...`);
   await client.request({
     url,
     method: 'PATCH',
@@ -94,7 +105,6 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
     throw error;
   }
 
-  // Exchange the code for the app configuration
   const response = await fetch(`https://api.github.com/app-manifests/${code}/conversions`, {
     method: 'POST',
     headers: {
@@ -110,21 +120,18 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
 
   const appConfig = await response.json();
   
-  // Extract values
   const appId = appConfig.id.toString();
   const webhookSecret = appConfig.webhook_secret;
   const privateKey = appConfig.pem;
 
-  // Trigger auto-update in background
   if (process.env.K_SERVICE) {
     updateCloudRunConfig({
       GITHUB_APP_ID: appId,
       GITHUB_WEBHOOK_SECRET: webhookSecret,
       GITHUB_PRIVATE_KEY: privateKey
-    }).catch(err => console.error('Auto-update failed:', err));
+    }).catch(err => console.error('>>> Auto-update failed:', err));
   }
 
-  // Render success page
   res.status(200).send(`
     <!DOCTYPE html>
     <html lang="en">
@@ -153,12 +160,11 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
                 <h1>✅ Setup Complete!</h1>
                 <p>Your bot is now fully configured and live.</p>
                 <p>The final step is to install the app on your repositories:</p>
-                <a href="\${appConfig.html_url}/installations/new" style="background: #2ea44f; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 20px;">Install Bot on Repositories</a>
+                <a href="${appConfig.html_url}/installations/new" style="background: #2ea44f; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 20px;">Install Bot on Repositories</a>
             </div>
         </div>
 
         <script>
-            // Simulating a wait for the Cloud Run deployment
             setTimeout(() => {
                 document.getElementById('loading').style.display = 'none';
                 document.getElementById('success').style.display = 'block';
@@ -169,23 +175,34 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
   `);
 }));
 
-// Health check endpoint
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
-
 // Webhook verification middleware
-const verifySignature = (req, res, next) => {
+const verifySignature = asyncHandler(async (req, res, next) => {
   const signature = req.headers['x-hub-signature-256'];
+  const appId = req.headers['x-github-hook-installation-target-id'];
+
   if (!signature) {
     const error = new Error('No signature provided');
     error.status = 401;
     return next(error);
   }
 
-  const secret = process.env.GITHUB_WEBHOOK_SECRET;
+  // 1. Get Secret from Environment (Global) or Firestore (Multi-tenant)
+  let secret = process.env.GITHUB_WEBHOOK_SECRET;
+
+  if (appId) {
+    const appConfig = await getAppConfig(appId);
+    if (appConfig?.webhookSecret) {
+      secret = appConfig.webhookSecret;
+      // Attach config to request for later use
+      req.appConfig = appConfig;
+    }
+  }
+
   if (!secret) {
-    console.error('GITHUB_WEBHOOK_SECRET is not set');
+    console.error('>>> GITHUB_WEBHOOK_SECRET not found for App ID:', appId);
     const error = new Error('Server configuration error');
     error.status = 500;
     return next(error);
@@ -202,12 +219,11 @@ const verifySignature = (req, res, next) => {
   }
 
   next();
-};
+});
 
-// Route POST /api/webhook
-// Using express.raw to ensure we can verify the signature with the raw payload
 app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignature, asyncHandler(async (req, res) => {
   const event = req.headers['x-github-event'];
+  console.info(`>>> Received webhook: event=${event}`);
   
   if (event === 'ping') {
     return res.status(200).send('pong');
@@ -220,10 +236,6 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
   const payload = JSON.parse(req.body.toString('utf8'));
   const action = payload.action;
 
-  // Trigger on:
-  // 1. New PRs (opened)
-  // 2. New code pushed (synchronize)
-  // 3. Manual label (labeled)
   const isManualTrigger = action === 'labeled' && payload.label?.name === 'security-review';
   const isAutoTrigger = action === 'opened' || action === 'synchronize';
 
@@ -233,29 +245,25 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
     const pull_number = payload.pull_request.number;
     const installationId = payload.installation?.id;
 
-    console.log(`Received PR event: owner=\${owner}, repo=\${repo}, pull_number=\${pull_number}, installationId=\${installationId}, trigger=\${action}`);
+    console.info(`>>> PROCESSING: owner=${owner}, repo=${repo}, pull_number=${pull_number}, installationId=${installationId}, trigger=${action}`);
     
-    // Initialize GitHub Service using the installation ID
     const githubService = new GitHubService(
-      process.env.GITHUB_APP_ID,
-      process.env.GITHUB_PRIVATE_KEY,
+      req.appConfig?.appId || process.env.GITHUB_APP_ID,
+      req.appConfig?.privateKey || process.env.GITHUB_PRIVATE_KEY,
       installationId
     );
 
-    // Async process in background
     if (process.env.SKIP_BACKGROUND !== 'true') {
       const processPromise = (async () => {
         try {
-          console.log(`Fetching PR diff for #\${pull_number}...`);
+          console.info(`>>> Fetching PR diff for #${pull_number}...`);
           const diff = await githubService.getPRDiff(owner, repo, pull_number);
           
-          console.log(`Sending diff to Security Agent for analysis...`);
+          console.info(`>>> Sending diff to Security Agent for analysis...`);
           const analysisResult = await analyzeDiff(diff);
           
-          console.log(`Analysis Results for #\${pull_number}:`, JSON.stringify(analysisResult, null, 2));
-
           const commitId = payload.pull_request.head.sha;
-          console.log(`Creating PR review for commit \${commitId}...`);
+          console.info(`>>> Creating PR review for commit ${commitId}...`);
           
           await githubService.createReview(
             owner,
@@ -266,9 +274,9 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
             analysisResult.comments
           );
           
-          console.log(`Successfully created PR review for #\${pull_number}`);
+          console.info(`>>> Successfully created PR review for #${pull_number}`);
         } catch (error) {
-          console.error(`Error processing PR #\${pull_number}:`, error);
+          console.error(`>>> Error processing PR #${pull_number}:`, error);
         }
       })();
       app.emit('pr_process_promise', processPromise);
@@ -280,19 +288,17 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
   res.status(200).send('Ignored PR action');
 }));
 
-// Global Error Handler Middleware
 app.use((err, req, res, next) => {
-  console.error(err.message || 'Internal Server Error', { error: err.message, stack: err.stack });
+  console.error('>>> Error Handler:', err.message);
   const status = err.status || 500;
   res.status(status).json({
     error: err.message || 'Internal Server Error'
   });
 });
 
-// Start server
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    console.log(`GitHub Security Bot server listening on port ${PORT}`);
+    console.info(`>>> GitHub Security Bot server listening on port ${PORT}`);
   });
 }
 
