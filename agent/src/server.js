@@ -121,33 +121,36 @@ app.get("/agent-card", (req, res) => {
   res.json(getAgentCard(baseUrl));
 });
 
-app.post("/api/analyze", verifyToken, async (req, res) => {
-  try {
-    const { inputType, content, structured } = req.body;
-    let codeToAnalyze = "";
+app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
+  const { inputType, content, structured } = req.body;
+  let codeToAnalyze = "";
 
-    if (inputType === 'git') {
-      logger.info(`Processing git repo: ${content}`, { module: 'git' });
-      codeToAnalyze = await processGitRepo(content);
-    } else {
-      codeToAnalyze = content;
-    }
+  if (inputType === 'git') {
+    logger.info(`Processing git repo: ${content}`, { module: 'git' });
+    codeToAnalyze = await processGitRepo(content);
+  } else {
+    codeToAnalyze = content;
+  }
 
-    if (!codeToAnalyze) {
-      return res.status(400).json({ error: "No code provided for analysis" });
-    }
+  if (!codeToAnalyze) {
+    const error = new Error("No code provided for analysis");
+    error.status = 400;
+    throw error;
+  }
 
-    if (!API_KEY) {
-      return res.status(500).json({ error: "GOOGLE_API_KEY is not configured" });
-    }
+  if (!API_KEY) {
+    const error = new Error("GOOGLE_API_KEY is not configured");
+    error.status = 500;
+    throw error;
+  }
 
-    logger.info("Calling Google AI Studio for security analysis...", { module: 'ai', structured });
+  logger.info("Calling Google AI Studio for security analysis...", { module: 'ai', structured });
 
-    let systemInstruction = "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.";
-    let generationConfig = {};
+  let systemInstruction = "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.";
+  let generationConfig = {};
 
-    if (structured) {
-      systemInstruction = `You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. 
+  if (structured) {
+    systemInstruction = `You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. 
       Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 
       Output Format: You MUST return a JSON object with the following schema:
       {
@@ -160,91 +163,86 @@ app.post("/api/analyze", verifyToken, async (req, res) => {
           }
         ]
       }`;
-      generationConfig = {
-        responseMimeType: "application/json",
-      };
-    }
-
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-3-flash-preview",
-      systemInstruction,
-      generationConfig
-    });
-
-    const result = await model.generateContent(codeToAnalyze);
-    const response = await result.response;
-    const output = response.text();
-
-    if (structured) {
-      try {
-        const parsed = JSON.parse(output);
-        return res.json(parsed);
-      } catch (e) {
-        logger.error("Failed to parse structured output from AI", { output });
-        return res.status(500).json({ error: "Failed to generate structured output" });
-      }
-    }
-
-    res.json({ report: output });
-  } catch (error) {
-    logger.error("Analysis error", { error: error.message, stack: error.stack });
-    res.status(500).json({ error: "Analysis failed", message: error.message });
+    generationConfig = {
+      responseMimeType: "application/json",
+    };
   }
-});
 
-app.post("/v1/message:send", verifyToken, async (req, res) => {
-  try {
-    const { message, text } = req.body;
-    let input = "";
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-3-flash-preview",
+    systemInstruction,
+    generationConfig
+  });
 
-    if (text) {
-      input = text;
-    } else if (message?.content && Array.isArray(message.content)) {
-      input = message.content.map(part => part.text || "").join("\n");
-    } else {
-      input = message?.content || message?.text || "";
+  const result = await model.generateContent(codeToAnalyze);
+  const response = await result.response;
+  const output = response.text();
+
+  if (structured) {
+    try {
+      const parsed = JSON.parse(output);
+      return res.json(parsed);
+    } catch (e) {
+      logger.error("Failed to parse structured output from AI", { output });
+      const error = new Error("Failed to generate structured output");
+      error.status = 500;
+      throw error;
     }
-    
-    if (!input || input === "[object Object]") {
-      logger.warn("Missing or invalid input content in request body");
-      if (typeof message?.content === 'object' && message.content !== null) {
-        input = JSON.stringify(message.content);
-      }
-    }
-
-    if (!API_KEY) {
-      return res.status(500).json({ error: "GOOGLE_API_KEY is not configured" });
-    }
-
-    logger.info("Calling Google AI Studio with gemini-3-flash-preview...", { module: 'ai' });
-
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-3-flash-preview",
-      systemInstruction: "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report."
-    });
-
-    const result = await model.generateContent(input);
-
-    const response = await result.response;
-    const responseText = response.text();
-
-    // Finalized A2A compliant response schema for Gemini CLI
-    res.json({ 
-      message: {
-        messageId: crypto.randomUUID(),
-        role: "ROLE_AGENT",
-        content: [
-          {
-            text: responseText
-          }
-        ]
-      }
-    });
-  } catch (error) {
-    logger.error("Execution error", { error: error.message, stack: error.stack });
-    res.status(500).json({ error: "Internal Server Error", message: error.message });
   }
-});
+
+  res.json({ report: output });
+}));
+
+app.post("/v1/message:send", verifyToken, asyncHandler(async (req, res) => {
+  const { message, text } = req.body;
+  let input = "";
+
+  if (text) {
+    input = text;
+  } else if (message?.content && Array.isArray(message.content)) {
+    input = message.content.map(part => part.text || "").join("\n");
+  } else {
+    input = message?.content || message?.text || "";
+  }
+  
+  if (!input || input === "[object Object]") {
+    logger.warn("Missing or invalid input content in request body");
+    if (typeof message?.content === 'object' && message.content !== null) {
+      input = JSON.stringify(message.content);
+    }
+  }
+
+  if (!API_KEY) {
+    const error = new Error("GOOGLE_API_KEY is not configured");
+    error.status = 500;
+    throw error;
+  }
+
+  logger.info("Calling Google AI Studio with gemini-3-flash-preview...", { module: 'ai' });
+
+  const model = genAI.getGenerativeModel({ 
+    model: "gemini-3-flash-preview",
+    systemInstruction: "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report."
+  });
+
+  const result = await model.generateContent(input);
+
+  const response = await result.response;
+  const responseText = response.text();
+
+  // Finalized A2A compliant response schema for Gemini CLI
+  res.json({ 
+    message: {
+      messageId: crypto.randomUUID(),
+      role: "ROLE_AGENT",
+      content: [
+        {
+          text: responseText
+        }
+      ]
+    }
+  });
+}));
 
 // Global Error Handler Middleware
 app.use((err, req, res, next) => {

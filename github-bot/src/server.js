@@ -7,14 +7,167 @@
 import express from 'express';
 import dotenv from 'dotenv';
 import crypto from 'crypto';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { GoogleAuth } from 'google-auth-library';
 import { GitHubService } from './github-service.js';
 import { analyzeDiff } from './agent-client.js';
+import { asyncHandler } from './utils/asyncHandler.js';
 
 // Load environment variables
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 const PORT = process.env.PORT || 3001;
+
+// Function to update Cloud Run environment variables
+async function updateCloudRunConfig(newEnv) {
+  const auth = new GoogleAuth({
+    scopes: 'https://www.googleapis.com/auth/cloud-platform'
+  });
+  const client = await auth.getClient();
+  const projectId = await auth.getProjectId();
+  const serviceName = 'github-security-bot';
+  const region = 'us-central1';
+  
+  // 1. Get current service configuration
+  const url = `https://${region}-run.googleapis.com/v2/projects/${projectId}/locations/${region}/services/${serviceName}`;
+  const getResponse = await client.request({ url });
+  const service = getResponse.data;
+
+  // 2. Prepare new environment variables
+  // Map newEnv object to Cloud Run env array format
+  const newEnvArray = Object.entries(newEnv).map(([name, value]) => ({ name, value }));
+  
+  // Merge with existing env, preferring new values
+  const currentEnv = service.template.containers[0].env || [];
+  const updatedEnv = [...currentEnv];
+  
+  for (const newVar of newEnvArray) {
+    const index = updatedEnv.findIndex(v => v.name === newVar.name);
+    if (index !== -1) {
+      updatedEnv[index] = newVar;
+    } else {
+      updatedEnv.push(newVar);
+    }
+  }
+
+  // 3. Update the service
+  service.template.containers[0].env = updatedEnv;
+  
+  // We must remove some fields that GitHub doesn't like in a PATCH request for the V2 API
+  delete service.status;
+  delete service.uri;
+  delete service.reconciling;
+  delete service.etag;
+  delete service.uid;
+  delete service.createTime;
+  delete service.updateTime;
+  delete service.deleteTime;
+  delete service.expireTime;
+  delete service.creator;
+  delete service.lastModifier;
+
+  console.log(`Updating Cloud Run service ${serviceName} with new credentials...`);
+  await client.request({
+    url,
+    method: 'PATCH',
+    data: service
+  });
+}
+
+// Serve the app creation manifest at the root
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, '../create-app.html'));
+});
+
+// Handle the redirection after GitHub App creation
+app.get('/setup-callback', asyncHandler(async (req, res) => {
+  const code = req.query.code;
+  
+  if (!code) {
+    const error = new Error('Missing code parameter');
+    error.status = 400;
+    throw error;
+  }
+
+  // Exchange the code for the app configuration
+  const response = await fetch(`https://api.github.com/app-manifests/${code}/conversions`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/vnd.github+json'
+    }
+  });
+
+  if (!response.ok) {
+    const error = new Error(`GitHub API error: ${response.status} ${await response.text()}`);
+    error.status = 502;
+    throw error;
+  }
+
+  const appConfig = await response.json();
+  
+  // Extract values
+  const appId = appConfig.id.toString();
+  const webhookSecret = appConfig.webhook_secret;
+  const privateKey = appConfig.pem;
+
+  // Trigger auto-update in background
+  if (process.env.K_SERVICE) {
+    updateCloudRunConfig({
+      GITHUB_APP_ID: appId,
+      GITHUB_WEBHOOK_SECRET: webhookSecret,
+      GITHUB_PRIVATE_KEY: privateKey
+    }).catch(err => console.error('Auto-update failed:', err));
+  }
+
+  // Render success page
+  res.status(200).send(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <title>App Setup Complete</title>
+        <style>
+            body { font-family: -apple-system, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 20px; color: #24292e; text-align: center; }
+            .card { border: 1px solid #e1e4e8; border-radius: 6px; padding: 40px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+            .loader { border: 4px solid #f3f3f3; border-top: 4px solid #2ea44f; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; margin: 20px auto; }
+            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+            h1 { color: #2ea44f; }
+            .success-content { display: none; }
+        </style>
+    </head>
+    <body>
+        <div class="card">
+            <div id="loading">
+                <h1>⚙️ Configuring Your Bot...</h1>
+                <p>We've received your GitHub credentials. The bot is now automatically updating its own configuration in Cloud Run.</p>
+                <div class="loader"></div>
+                <p><small>This will trigger a service restart. Please wait about 30 seconds.</small></p>
+            </div>
+
+            <div id="success" class="success-content">
+                <h1>✅ Setup Complete!</h1>
+                <p>Your bot is now fully configured and live.</p>
+                <p>The final step is to install the app on your repositories:</p>
+                <a href="\${appConfig.html_url}/installations/new" style="background: #2ea44f; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 20px;">Install Bot on Repositories</a>
+            </div>
+        </div>
+
+        <script>
+            // Simulating a wait for the Cloud Run deployment
+            setTimeout(() => {
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('success').style.display = 'block';
+            }, 15000);
+        </script>
+    </body>
+    </html>
+  `);
+}));
 
 // Health check endpoint
 app.get('/health', (req, res) => {
@@ -25,13 +178,17 @@ app.get('/health', (req, res) => {
 const verifySignature = (req, res, next) => {
   const signature = req.headers['x-hub-signature-256'];
   if (!signature) {
-    return res.status(401).send('No signature provided');
+    const error = new Error('No signature provided');
+    error.status = 401;
+    return next(error);
   }
 
   const secret = process.env.GITHUB_WEBHOOK_SECRET;
   if (!secret) {
     console.error('GITHUB_WEBHOOK_SECRET is not set');
-    return res.status(500).send('Server configuration error');
+    const error = new Error('Server configuration error');
+    error.status = 500;
+    return next(error);
   }
 
   const hmac = crypto.createHmac('sha256', secret);
@@ -39,7 +196,9 @@ const verifySignature = (req, res, next) => {
   const checksum = Buffer.from(signature, 'utf8');
 
   if (checksum.length !== digest.length || !crypto.timingSafeEqual(digest, checksum)) {
-    return res.status(401).send('Invalid signature');
+    const error = new Error('Invalid signature');
+    error.status = 401;
+    return next(error);
   }
 
   next();
@@ -47,7 +206,7 @@ const verifySignature = (req, res, next) => {
 
 // Route POST /api/webhook
 // Using express.raw to ensure we can verify the signature with the raw payload
-app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignature, (req, res) => {
+app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignature, asyncHandler(async (req, res) => {
   const event = req.headers['x-github-event'];
   
   if (event === 'ping') {
@@ -58,65 +217,76 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
     return res.status(200).send('Ignored event type');
   }
 
-  try {
-    const payload = JSON.parse(req.body.toString('utf8'));
-    const action = payload.action;
+  const payload = JSON.parse(req.body.toString('utf8'));
+  const action = payload.action;
 
-    if (action === 'opened' || action === 'synchronize') {
-      const owner = payload.repository.owner.login;
-      const repo = payload.repository.name;
-      const pull_number = payload.pull_request.number;
-      const installationId = payload.installation?.id;
+  // Trigger on:
+  // 1. New PRs (opened)
+  // 2. New code pushed (synchronize)
+  // 3. Manual label (labeled)
+  const isManualTrigger = action === 'labeled' && payload.label?.name === 'security-review';
+  const isAutoTrigger = action === 'opened' || action === 'synchronize';
 
-      console.log(`Received PR event: owner=${owner}, repo=${repo}, pull_number=${pull_number}, installationId=${installationId}`);
-      
-      // Initialize GitHub Service using the installation ID
-      const githubService = new GitHubService(
-        process.env.GITHUB_APP_ID,
-        process.env.GITHUB_PRIVATE_KEY,
-        installationId
-      );
+  if (isAutoTrigger || isManualTrigger) {
+    const owner = payload.repository.owner.login;
+    const repo = payload.repository.name;
+    const pull_number = payload.pull_request.number;
+    const installationId = payload.installation?.id;
 
-      // Async process in background
-      if (process.env.SKIP_BACKGROUND !== 'true') {
-        const processPromise = (async () => {
-          try {
-            console.log(`Fetching PR diff for #${pull_number}...`);
-            const diff = await githubService.getPRDiff(owner, repo, pull_number);
-            
-            console.log(`Sending diff to Security Agent for analysis...`);
-            const analysisResult = await analyzeDiff(diff);
-            
-            console.log(`Analysis Results for #${pull_number}:`, JSON.stringify(analysisResult, null, 2));
+    console.log(`Received PR event: owner=\${owner}, repo=\${repo}, pull_number=\${pull_number}, installationId=\${installationId}, trigger=\${action}`);
+    
+    // Initialize GitHub Service using the installation ID
+    const githubService = new GitHubService(
+      process.env.GITHUB_APP_ID,
+      process.env.GITHUB_PRIVATE_KEY,
+      installationId
+    );
 
-            const commitId = payload.pull_request.head.sha;
-            console.log(`Creating PR review for commit ${commitId}...`);
-            
-            await githubService.createReview(
-              owner,
-              repo,
-              pull_number,
-              commitId,
-              analysisResult.summary,
-              analysisResult.comments
-            );
-            
-            console.log(`Successfully created PR review for #${pull_number}`);
-          } catch (error) {
-            console.error(`Error processing PR #${pull_number}:`, error);
-          }
-        })();
-        app.emit('pr_process_promise', processPromise);
-      }
+    // Async process in background
+    if (process.env.SKIP_BACKGROUND !== 'true') {
+      const processPromise = (async () => {
+        try {
+          console.log(`Fetching PR diff for #\${pull_number}...`);
+          const diff = await githubService.getPRDiff(owner, repo, pull_number);
+          
+          console.log(`Sending diff to Security Agent for analysis...`);
+          const analysisResult = await analyzeDiff(diff);
+          
+          console.log(`Analysis Results for #\${pull_number}:`, JSON.stringify(analysisResult, null, 2));
 
-      return res.status(202).send('Accepted');
+          const commitId = payload.pull_request.head.sha;
+          console.log(`Creating PR review for commit \${commitId}...`);
+          
+          await githubService.createReview(
+            owner,
+            repo,
+            pull_number,
+            commitId,
+            analysisResult.summary,
+            analysisResult.comments
+          );
+          
+          console.log(`Successfully created PR review for #\${pull_number}`);
+        } catch (error) {
+          console.error(`Error processing PR #\${pull_number}:`, error);
+        }
+      })();
+      app.emit('pr_process_promise', processPromise);
     }
 
-    res.status(200).send('Ignored PR action');
-  } catch (err) {
-    console.error('Error parsing webhook payload:', err);
-    res.status(400).send('Bad Request');
+    return res.status(202).send('Accepted');
   }
+
+  res.status(200).send('Ignored PR action');
+}));
+
+// Global Error Handler Middleware
+app.use((err, req, res, next) => {
+  console.error(err.message || 'Internal Server Error', { error: err.message, stack: err.stack });
+  const status = err.status || 500;
+  res.status(status).json({
+    error: err.message || 'Internal Server Error'
+  });
 });
 
 // Start server

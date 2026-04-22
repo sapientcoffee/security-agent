@@ -30,14 +30,14 @@ export class GitHubService {
   }
 
   async createReview(owner, repo, pullNumber, commitId, summary, comments) {
-    const formattedComments = comments.map(c => ({
+    const formattedComments = (comments || []).map(c => ({
       path: c.path,
       line: c.line,
       body: c.body,
-      side: 'RIGHT'
+      side: 'RIGHT',
     }));
 
-    const response = await this.octokit.rest.pulls.createReview({
+    await this.octokit.rest.pulls.createReview({
       owner,
       repo,
       pull_number: pullNumber,
