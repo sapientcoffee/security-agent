@@ -116,14 +116,26 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
   const startManifestFlow = () => {
     // Derive the webhook URL from the API base URL
     const apiBaseUrl = apiClient.defaults.baseURL || '';
-    const fullApiBaseUrl = apiBaseUrl.startsWith('http') 
-      ? apiBaseUrl 
-      : window.location.origin + (apiBaseUrl === '/' ? '' : apiBaseUrl);
-      
-    const webhookUrl = fullApiBaseUrl.endsWith('/') 
-      ? `${fullApiBaseUrl}api/webhook` 
-      : `${fullApiBaseUrl}/api/webhook`;
 
+    // Ensure we have a valid URL with protocol
+    let fullApiBaseUrl = '';
+    if (apiBaseUrl.startsWith('http')) {
+      fullApiBaseUrl = apiBaseUrl;
+    } else if (apiBaseUrl.startsWith('//')) {
+      fullApiBaseUrl = window.location.protocol + apiBaseUrl;
+    } else {
+      // Handle relative paths or empty base URL
+      const origin = window.location.origin;
+      const path = apiBaseUrl === '/' || !apiBaseUrl ? '' : apiBaseUrl;
+      fullApiBaseUrl = origin + path;
+    }
+
+    // Safety check: ensure fullApiBaseUrl is not just an origin if we expect it to be an API
+    if (fullApiBaseUrl.endsWith('/')) {
+      fullApiBaseUrl = fullApiBaseUrl.slice(0, -1);
+    }
+
+    const webhookUrl = `${fullApiBaseUrl}/api/webhook`;
     const manifest = {
       "name": "Security Bot-" + Math.floor(Math.random() * 1000),
       "url": window.location.origin,

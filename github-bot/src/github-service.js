@@ -37,7 +37,7 @@ export class GitHubService {
       side: 'RIGHT',
     }));
 
-    await this.octokit.rest.pulls.createReview({
+    const response = await this.octokit.rest.pulls.createReview({
       owner,
       repo,
       pull_number: pullNumber,

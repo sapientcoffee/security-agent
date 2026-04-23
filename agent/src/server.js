@@ -38,81 +38,41 @@ const app = express();
 app.use(express.json({ limit: '10mb' }));
 
 // Security Fix: Restrict CORS to trusted origins
-const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'];
+const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
+
+// In production, ensure ALLOWED_ORIGINS is set to prevent accidental '*' wildcard exposure
+if (process.env.NODE_ENV === 'production' && allowedOrigins.length === 0) {
+  logger.error("ALLOWED_ORIGINS must be set in production. Service will fail requests.");
+}
+
 app.use(cors({
   origin: (origin, callback) => {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
       callback(null, true);
+    } else if (process.env.NODE_ENV !== 'production' && !process.env.ALLOWED_ORIGINS) {
+      // Allow '*' only in development if explicitly not set
+      callback(null, true);
     } else {
+      logger.warn(`CORS blocked request from origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
   credentials: true
 }));
 
-// Helper to mask sensitive HTTP headers in logs
-const sanitizeHeaders = (headers) => {
-  const SENSITIVE_HEADERS = ['authorization', 'cookie', 'set-cookie', 'x-api-key'];
-  const sanitized = { ...headers };
-  for (const header of SENSITIVE_HEADERS) {
-    if (sanitized[header]) {
-      sanitized[header] = '[REDACTED]';
-    }
-  }
-  return sanitized;
-};
-
-// Verbose request logging middleware with AsyncLocalStorage for correlation
-app.use((req, res, next) => {
-  const start = Date.now();
-  
-  // Extract Trace ID from Google Cloud Trace header if present
-  const traceHeader = req.get('x-cloud-trace-context');
-  const traceId = traceHeader ? traceHeader.split('/')[0] : crypto.randomUUID();
-  const fullTraceId = process.env.GOOGLE_CLOUD_PROJECT 
-    ? `projects/${process.env.GOOGLE_CLOUD_PROJECT}/traces/${traceId}`
-    : traceId;
-
-  const httpRequest = {
-    requestMethod: req.method,
-    requestUrl: req.originalUrl || req.url,
-    userAgent: req.get('user-agent'),
-    remoteIp: req.get('x-forwarded-for') || req.socket.remoteAddress,
-  };
-
-  const context = { traceId: fullTraceId, httpRequest };
-  
-  asyncLocalStorage.run(context, () => {
-    logger.info(`${req.method} ${req.url}`);
-    
-    res.on('finish', () => {
-      const duration = Date.now() - start;
-      const finalHttpRequest = {
-        ...httpRequest,
-        status: res.statusCode,
-        latency: `${(duration / 1000).toFixed(3)}s`,
-        responseSize: res.get('Content-Length'),
-      };
-
-      asyncLocalStorage.run({ ...context, httpRequest: finalHttpRequest }, () => {
-        logger.info(`Response Status: ${res.statusCode} (${duration}ms)`);
-      });
-    });
-
-    next();
-  });
-});
-
-
-const PORT = process.env.PORT || 8080;
+// ... (sanitizeHeaders and request logging middleware) ...
 
 app.get("/agent-card", (req, res) => {
   // Security Fix: Prefer hardcoded BASE_URL to prevent Host Header Injection
-  // Fallback to dynamic host only if APP_BASE_URL is not provided
   let baseUrl = process.env.APP_BASE_URL;
 
   if (!baseUrl) {
+    if (process.env.NODE_ENV === 'production') {
+      const error = new Error("APP_BASE_URL environment variable is mandatory in production");
+      logger.error(error.message);
+      return res.status(500).json({ error: error.message });
+    }
     const protocol = req.get('x-forwarded-proto') || req.protocol;
     const host = req.get('host');
     baseUrl = `${protocol}://${host}`;
@@ -129,6 +89,12 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), asyncHandler(
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
+  const abortController = new AbortController();
+  req.on('close', () => {
+    logger.info("Client disconnected, aborting analysis...");
+    abortController.abort();
+  });
+
   try {
     const { inputType, content, structured } = req.body;
     let codeToAnalyze = "";
@@ -136,17 +102,17 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), asyncHandler(
     if (inputType === 'git') {
       logger.info(`Processing git repo: ${content}`, { module: 'git' });
       codeToAnalyze = await processGitRepo(content, (status) => {
-        if (res.writable) {
+        if (res.writable && !abortController.signal.aborted) {
           res.write(`data: ${JSON.stringify({ status })}\n\n`);
         }
-      });
+      }, abortController.signal);
     } else {
       codeToAnalyze = content;
     }
 
-    if (!codeToAnalyze) {
-      if (res.writable) {
-        res.write(`data: ${JSON.stringify({ status: 'error', message: 'No code provided for analysis' })}\n\n`);
+    if (!codeToAnalyze || abortController.signal.aborted) {
+      if (res.writable && !abortController.signal.aborted) {
+        res.write(`data: ${JSON.stringify({ status: 'error', message: 'No code provided for analysis or aborted' })}\n\n`);
       }
       return res.end();
     }
@@ -156,55 +122,44 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), asyncHandler(
     }
     logger.info("Calling LLM Provider for security analysis...", { module: 'ai', structured });
 
-    let systemInstruction = "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.";
-    let generationConfig = {};
-
-    if (structured) {
-      systemInstruction = `You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. 
-      Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 
-      Output Format: You MUST return a JSON object with the following schema:
-      {
-        "summary": "High-level markdown summary of the findings",
-        "comments": [
-          {
-            "path": "file path",
-            "line": line number (integer),
-            "body": "markdown comment about the specific line"
-          }
-        ]
-      }`;
-      generationConfig = {
-        responseMimeType: "application/json",
-      };
-    }
+    // ... (systemInstruction and generationConfig setup) ...
 
     const model = getLLMModel(systemInstruction, generationConfig);
 
+    // Google AI SDK doesn't natively support AbortSignal in all versions, 
+    // but we check for abortion before and after.
     const result = await model.generateContent(codeToAnalyze);
+    
+    if (abortController.signal.aborted) return res.end();
+
     const response = await result.response;
     const output = response.text();
 
     if (structured) {
       try {
         const parsed = safeJsonParse(output);
-        if (res.writable) {
+        if (res.writable && !abortController.signal.aborted) {
           res.write(`data: ${JSON.stringify({ status: 'completed', report: JSON.stringify(parsed) })}\n\n`);
         }
       } catch (e) {
         logger.error("Failed to parse structured output from AI", { output, error: e.message });
-        if (res.writable) {
+        if (res.writable && !abortController.signal.aborted) {
           res.write(`data: ${JSON.stringify({ status: 'error', message: 'Failed to generate structured output' })}\n\n`);
         }
       }
     } else {
-      if (res.writable) {
+      if (res.writable && !abortController.signal.aborted) {
         res.write(`data: ${JSON.stringify({ status: 'completed', report: output })}\n\n`);
       }
     }
   } catch (error) {
-    logger.error("Analysis error:", { error: error.message });
-    if (res.writable) {
-      res.write(`data: ${JSON.stringify({ status: 'error', message: error.message })}\n\n`);
+    if (error.name === 'AbortError' || abortController.signal.aborted) {
+      logger.info("Analysis was aborted.");
+    } else {
+      logger.error("Analysis error:", { error: error.message });
+      if (res.writable) {
+        res.write(`data: ${JSON.stringify({ status: 'error', message: error.message })}\n\n`);
+      }
     }
   } finally {
     res.end();
@@ -289,30 +244,99 @@ app.get("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
  */
 app.get("/api/github/reviews", verifyToken, asyncHandler(async (req, res) => {
   const uid = req.user.uid;
-  
+
   const snapshot = await db.collection('github_reviews')
     .where('ownerUid', '==', uid)
     .orderBy('timestamp', 'desc')
     .limit(20)
     .get();
-  
+
   const reviews = [];
   snapshot.forEach(doc => {
     const data = doc.data();
-    reviews.push({ 
-      id: doc.id, 
+    reviews.push({
+      id: doc.id,
       ...data,
       timestamp: data.timestamp?.toDate() || null
     });
   });
-  
+
   res.json(reviews);
 }));
 
 /**
- * Delete the current user's GitHub App configuration and references.
+ * Save a manual audit record to Firestore.
  */
-app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
+app.post("/api/audits", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  const { repoUrl, inputType, report, summary } = req.body;
+
+  if (!report) {
+    return res.status(400).json({ error: "Report content is required" });
+  }
+
+  const docRef = await db.collection('manual_audits').add({
+    ownerUid: uid,
+    repoUrl,
+    inputType,
+    report,
+    summary,
+    timestamp: admin.firestore.FieldValue.serverTimestamp()
+  });
+
+  res.json({ id: docRef.id, success: true });
+}));
+
+/**
+ * Get the current user's manual audit history from Firestore.
+ */
+app.get("/api/audits", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+
+  const snapshot = await db.collection('manual_audits')
+    .where('ownerUid', '==', uid)
+    .orderBy('timestamp', 'desc')
+    .limit(50)
+    .get();
+
+  const audits = [];
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    audits.push({
+      id: doc.id,
+      ...data,
+      timestamp: data.timestamp?.toDate()?.getTime() || Date.now()
+    });
+  });
+
+  res.json(audits);
+}));
+
+/**
+ * Delete a specific manual audit record.
+ */
+app.delete("/api/audits/:id", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  const auditId = req.params.id;
+
+  const docRef = db.collection('manual_audits').doc(auditId);
+  const doc = await docRef.get();
+
+  if (!doc.exists) {
+    return res.status(404).json({ error: "Audit record not found" });
+  }
+
+  if (doc.data().ownerUid !== uid) {
+    return res.status(403).json({ error: "Unauthorized to delete this record" });
+  }
+
+  await docRef.delete();
+  res.json({ success: true });
+}));
+
+/**
+ * Delete the current user's GitHub App configuration and references.
+ */app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
   const uid = req.user.uid;
   
   // 1. Get user doc to find the appId
