@@ -1,69 +1,64 @@
 # Security Audit Agent Platform
 
-A multi-tenant platform for automated functional and security audits of source code. Powered by Google Gemini 3.1 Flash and built for Google Cloud Run.
+![Security AI Guardian](./nanobanana-output/a_professional_and_futuristic_co.png)
 
-## 🏗️ Architecture
+A professional, multi-tenant platform for automated functional and security audits of source code. Powered by Google Gemini 3.1 Flash and designed for reliability on Google Cloud Platform.
 
-The system is a distributed platform consisting of three primary services:
+## 🏗️ Architecture Overview
 
-- **Frontend (React + Vite + Tailwind)**: A modern user portal for managing integrations, viewing review history, and performing manual on-demand audits.
-- **Backend Agent (Node.js/Express)**: The core analysis engine. It handles multi-tenant data in Firestore, clones Git repositories, and interfaces with the Gemini model.
-- **GitHub Bot (Node.js)**: A lightweight webhook listener that orchestrates automated Pull Request reviews. It dynamically loads user configurations from Firestore.
+The system is built as a distributed microservices platform, leveraging serverless computing and managed database services for high availability and security.
 
-### Key Workflows
-1. **Automated PR Reviews**: When a PR is opened or updated, the GitHub Bot looks up the owner's credentials in Firestore, fetches the diff, and requests an analysis from the Agent.
-2. **On-Demand Audits**: Users can paste code, upload files, or provide public Git URLs directly in the Frontend for immediate AI feedback.
-3. **One-Click Integration**: Users can create and link their own GitHub App in seconds using the Manifest-based setup flow.
+![Platform Architecture](./nanobanana-output/a_technical_architecture_diagram.png)
+
+### Core Services
+- **Frontend (React + Vite + Tailwind)**: The command center. Users manage their GitHub integrations, view historical audit reports, and perform on-demand manual scans.
+- **Backend Agent (Node.js/Express)**: The intelligence hub. Responsible for code retrieval (Git cloning), multi-tenant state management (Firestore), secure credential storage (Secret Manager), and AI orchestration (Gemini).
+- **GitHub Bot (Node.js)**: The automation bridge. A lightweight webhook processor that handles incoming PR events and manages long-running analysis tasks via Cloud Tasks.
+
+## 🔄 Global Flows
+
+### 1. Automated PR Review Flow
+When a user pushes code to a Pull Request:
+1.  **Event**: GitHub sends a `pull_request` webhook to the Bot.
+2.  **Auth**: Bot verifies the HMAC signature and retrieves user config from Firestore.
+3.  **Queue**: Bot enqueues an analysis job in **Google Cloud Tasks** to ensure reliability.
+4.  **Process**: Cloud Task triggers the Bot's internal analysis endpoint.
+5.  **Audit**: Bot fetches the PR diff and requests a structured analysis from the Agent.
+6.  **AI**: Agent invokes Gemini 3.1 Flash with specialized security engineering instructions.
+7.  **Feedback**: Bot posts findings back to the PR as inline comments and a summary.
+
+### 2. Manual On-Demand Audit
+1.  **Input**: User provides code via the Frontend dashboard (text, file, or URL).
+2.  **Request**: Frontend calls the Agent's `/api/analyze` endpoint.
+3.  **Analysis**: Agent processes the input and performs the AI audit.
+4.  **Report**: Frontend renders a detailed Markdown report with security findings.
 
 ## 📁 Project Structure
 
-- **[`/agent`](./agent)**: Core analysis service and API.
-- **[`/frontend`](./frontend)**: User dashboard and manual audit interface.
-- **[`/github-bot`](./github-bot)**: PR review automation service.
-- **[`/docs`](./docs)**: Detailed setup and architectural documentation.
+- **[`/agent`](./agent)**: The "Brain" - Analysis engine and multi-tenant API.
+- **[`/frontend`](./frontend)**: The "Portal" - React user dashboard.
+- **[`/github-bot`](./github-bot)**: The "Worker" - Webhook listener and queue manager.
+- **[`/docs`](./docs)**: Strategic guides for setup and deployment.
 
 ## 🚀 Getting Started
 
-### Prerequisites
-- Node.js 20+
-- Google Cloud Project with Firestore enabled
-- Gemini API Key (from Google AI Studio)
+### Local Setup
+```bash
+# Install all dependencies
+npm install
 
-### Local Development
+# Start services (Requires local .env configuration)
+cd agent && npm run dev
+cd frontend && npm run dev
+```
 
-1. **Install All Dependencies**:
-   ```bash
-   npm install
-   ```
+### Cloud Deployment
+For full production setup, see the **[Deployment Guide](./docs/deployment.md)**.
 
-2. **Backend Setup**:
-   ```bash
-   cd agent
-   # Create .env with GOOGLE_API_KEY and firebase config
-   npm run dev
-   ```
-
-3. **Frontend Setup**:
-   ```bash
-   cd frontend
-   # Create .env with VITE_API_URL and firebase config
-   npm run dev
-   ```
-
-## 📦 Deployment (Cloud Run)
-
-The platform is designed to be deployed as three separate services on Cloud Run.
-
-1. **Deploy Agent**: Build and deploy the backend service first.
-2. **Deploy Bot**: Deploy the webhook listener.
-3. **Deploy Frontend**: Build the UI using `gcloud builds submit` to bake in environment variables.
-
-For detailed instructions, see [the Deployment Guide](./docs/deployment.md).
-
-## 🔒 Security & Multi-Tenancy
-- **Data Isolation:** User-specific GitHub credentials (private keys, secrets) are stored in Firestore and linked to Firebase Auth UIDs.
-- **Webhook Security:** Every incoming GitHub event is verified using HMAC-SHA256 with the app-specific secret.
-- **Traceability:** Distributed tracing is implemented across all services for deep observability in Cloud Logging.
+## 🔒 Security Principles
+- **Credential Isolation**: GitHub Private Keys are stored in Google Cloud Secret Manager.
+- **Zero-Trust Webhooks**: Every webhook is verified using app-specific shared secrets.
+- **Atomic Operations**: All multi-step database updates use Firestore Transactions.
 
 ---
 &copy; 2026 Security Audit Agent &bull; Functional and Security Analysis for the AI Era.

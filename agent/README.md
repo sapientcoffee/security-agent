@@ -1,63 +1,41 @@
 # Security Audit Remote Agent
 
-The core analysis engine of the Security Audit Platform. This service processes code, performs security audits using Gemini, and manages multi-tenant configuration in Firestore.
+The core analysis engine and multi-tenant management service for the Security Audit Platform.
 
-## 🚀 Key Features
-- **AI-Powered Audits:** Uses **Gemini 3.1 Flash** for functional and security reviews.
-- **Multi-Tenant:** Securely stores and retrieves user-specific GitHub App configurations.
-- **Git Integration:** Clones and traverses repositories to aggregate source code for analysis.
-- **History Tracking:** Stores a searchable history of GitHub PR reviews.
+## 🏗️ Internal Architecture
 
-## 📡 API Endpoints
+The Agent service acts as a centralized "Intelligence API" that orchestrates various specialized modules:
 
-### Core Analysis
-- **`POST /api/analyze`**: Performs a security analysis.
-  - **Payload**: `{ "inputType": "text" | "git", "content": string }`
-  - **Response**: `{ "report": string }`
+1.  **Input Adapters**: Normalizes code from diverse sources (Plaintext, File Uploads, or Git Repositories).
+2.  **Git Engine**: Uses `simple-git` to securely clone repositories into temporary storage, performing tree-traversal and source code aggregation.
+3.  **Security Middleware**: Validates Firebase OIDC tokens and ensures multi-tenant isolation.
+4.  **AI Orchestrator**: Interfaces with **Gemini 3.1 Flash**, applying complex system instructions for functional assessment and security auditing.
+5.  **Data Layer**: Manages persistent state in **Firestore** and protects secrets in **Google Cloud Secret Manager**.
 
-### GitHub Integration (Authenticated)
-- **`GET /api/github/config`**: Retrieves the user's current GitHub App status.
-- **`POST /api/github/finalize-setup`**: Exchanges a GitHub Manifest code for credentials.
-- **`GET /api/github/reviews`**: Fetches the user's history of automated reviews.
-- **`DELETE /api/github/config`**: Securely deletes the user's integration and history.
+## 📡 API Endpoints & Flow
+
+### Code Analysis (`POST /api/analyze`)
+This is the primary endpoint for both the Bot and the Frontend.
+- **Request**: `{ "inputType": "git" | "code", "content": "...", "structured": true|false }`
+- **Internal Flow**:
+    1.  **Extraction**: If `git`, clones repo and extracts code. If `code`, uses raw content.
+    2.  **Analysis**: Sends content to Gemini with the "Security Engineer" persona.
+    3.  **Parsing**: Uses `safeJsonParse` to strip Markdown delimiters and return structured JSON (if requested).
+- **Response**: `{ "report": "markdown" }` or `{ "summary": "...", "comments": [] }`
+
+### GitHub Management (Authenticated)
+- **`GET /api/github/config`**: Fetches user's bot status.
+- **`POST /api/github/finalize-setup`**: Handles Manifest code exchange. **(Uses Firestore Transactions)**.
+- **`GET /api/github/reviews`**: Retrieves audit history.
 
 ## 📦 Deployment (Cloud Run)
-
-1.  **Build and Push**:
-    ```bash
-    gcloud builds submit --tag gcr.io/[PROJECT_ID]/security-audit-agent .
-    ```
-
-2.  **Deploy**:
-    ```bash
-    gcloud run deploy security-audit-agent \
-      --image gcr.io/[PROJECT_ID]/security-audit-agent \
-      --platform managed \
-      --region us-central1 \
-      --allow-unauthenticated \
-      --set-env-vars GOOGLE_API_KEY=[YOUR_API_KEY],GOOGLE_CLOUD_PROJECT=[YOUR_PROJECT_ID]
-    ```
+```bash
+gcloud run deploy security-audit-agent \
+  --source . \
+  --set-env-vars="GOOGLE_API_KEY=...,GOOGLE_CLOUD_PROJECT=..."
+```
 
 ## 🛠 Local Development
-
-1. **Install Dependencies**:
-   ```bash
-   npm install
-   ```
-
-2. **Environment Variables**:
-   Create a `.env` file in `/agent`:
-   ```env
-   GOOGLE_API_KEY=your_key
-   GOOGLE_CLOUD_PROJECT=your_project_id
-   PORT=8080
-   ```
-
-3. **Run Server**:
-   ```bash
-   npm run dev
-   ```
-
-## 🧠 Architecture
-
-The agent uses a combination of **Firebase Admin SDK** for database operations and **Google Cloud Identity** for secure request validation. It is designed to be stateless and scales horizontally on Cloud Run.
+1. `npm install`
+2. Configure `.env` (See [Setup Guide](../docs/github-app-setup.md))
+3. `npm run dev`
