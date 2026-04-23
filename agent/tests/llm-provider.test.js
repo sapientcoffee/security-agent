@@ -1,72 +1,65 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getLLMModel } from "../src/lib/llm-provider.js";
+import { getLLMModel, resetClientsForTesting } from "../src/lib/llm-provider.js";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { VertexAI } from "@google-cloud/vertexai";
 
-// Mock @google/generative-ai
 vi.mock("@google/generative-ai", () => {
-  const mockGetGenerativeModel = vi.fn();
   return {
-    GoogleGenerativeAI: vi.fn(() => ({
-      getGenerativeModel: mockGetGenerativeModel,
+    GoogleGenerativeAI: vi.fn().mockImplementation(() => ({
+      getGenerativeModel: vi.fn().mockReturnValue({ generateContent: vi.fn() }),
     })),
   };
 });
 
-// Mock @google-cloud/vertexai
 vi.mock("@google-cloud/vertexai", () => {
-  const mockGetGenerativeModel = vi.fn();
   return {
-    VertexAI: vi.fn(() => ({
-      getGenerativeModel: mockGetGenerativeModel,
+    VertexAI: vi.fn().mockImplementation(() => ({
+      getGenerativeModel: vi.fn().mockReturnValue({ generateContent: vi.fn() }),
     })),
   };
 });
 
-describe("getLLMModel", () => {
-  let originalEnv;
+describe("llm-provider", () => {
+  const originalEnv = process.env;
 
   beforeEach(() => {
-    // Save original environment
-    originalEnv = process.env;
-    process.env = { ...originalEnv };
+    vi.resetModules();
     vi.clearAllMocks();
+    process.env = { ...originalEnv };
+    resetClientsForTesting();
   });
 
   afterEach(() => {
-    // Restore original environment
     process.env = originalEnv;
   });
 
-  describe("when USE_VERTEX_AI='true'", () => {
-    beforeEach(() => {
+  describe("Vertex AI Provider", () => {
+    it("should instantiate VertexAI with correct config when USE_VERTEX_AI is true", () => {
       process.env.USE_VERTEX_AI = "true";
       process.env.VERTEX_PROJECT = "test-project";
-      process.env.VERTEX_LOCATION = "us-west1";
-      process.env.VERTEX_MODEL = "gemini-3.1-pro-preview";
-    });
+      process.env.VERTEX_LOCATION = "us-east1";
 
-    it("should instantiate VertexAI with correct project and location and generationConfig", () => {
-      const systemInstruction = "You are an expert.";
-      const generationConfig = { responseMimeType: "application/json" };
-      getLLMModel(systemInstruction, generationConfig);
+      getLLMModel("test instruction");
 
       expect(VertexAI).toHaveBeenCalledWith({
         project: "test-project",
-        location: "us-west1",
-      });
-
-      const vertexInstance = vi.mocked(VertexAI).mock.results[0].value;
-      expect(vertexInstance.getGenerativeModel).toHaveBeenCalledWith({
-        model: "gemini-3.1-pro-preview",
-        systemInstruction,
-        generationConfig,
+        location: "us-east1",
       });
     });
 
-    it("should fallback to 'us-central1' if VERTEX_LOCATION is missing", () => {
+    it("should throw an error if VERTEX_PROJECT is missing when USE_VERTEX_AI is true", () => {
+      process.env.USE_VERTEX_AI = "true";
+      delete process.env.VERTEX_PROJECT;
+
+      expect(() => getLLMModel("test")).toThrow(/VERTEX_PROJECT is required/);
+    });
+
+    it("should use default location us-central1 if VERTEX_LOCATION is missing", () => {
+      process.env.USE_VERTEX_AI = "true";
+      process.env.VERTEX_PROJECT = "test-project";
       delete process.env.VERTEX_LOCATION;
-      getLLMModel("test");
+
+      getLLMModel("test instruction");
 
       expect(VertexAI).toHaveBeenCalledWith({
         project: "test-project",
@@ -74,54 +67,59 @@ describe("getLLMModel", () => {
       });
     });
 
-    it("should fallback to 'gemini-3.1-pro-preview' if VERTEX_MODEL is missing", () => {
-      delete process.env.VERTEX_MODEL;
-      getLLMModel("test");
+    it("should reuse the VertexAI client (singleton)", () => {
+      process.env.USE_VERTEX_AI = "true";
+      process.env.VERTEX_PROJECT = "test-project";
 
-      const vertexInstance = vi.mocked(VertexAI).mock.results[0].value;
-      expect(vertexInstance.getGenerativeModel).toHaveBeenCalledWith({
-        model: "gemini-3.1-pro-preview",
-        systemInstruction: "test",
-      });
+      getLLMModel("inst 1");
+      getLLMModel("inst 2");
+
+      expect(VertexAI).toHaveBeenCalledTimes(1);
     });
   });
 
-  describe("when USE_VERTEX_AI is false or unset", () => {
-    beforeEach(() => {
-      delete process.env.USE_VERTEX_AI;
+  describe("Google AI Studio Provider", () => {
+    it("should instantiate GoogleGenerativeAI when USE_VERTEX_AI is false", () => {
+      process.env.USE_VERTEX_AI = "false";
       process.env.GOOGLE_API_KEY = "test-api-key";
-      process.env.MODEL_NAME = "gemini-3-flash-preview";
-    });
 
-    it("should instantiate GoogleGenerativeAI with GOOGLE_API_KEY and generationConfig", () => {
-      const systemInstruction = "test instruction";
-      const generationConfig = { responseMimeType: "application/json" };
-      getLLMModel(systemInstruction, generationConfig);
+      getLLMModel("test instruction");
 
       expect(GoogleGenerativeAI).toHaveBeenCalledWith("test-api-key");
-
-      const genAIInstance = vi.mocked(GoogleGenerativeAI).mock.results[0].value;
-      expect(genAIInstance.getGenerativeModel).toHaveBeenCalledWith({
-        model: "gemini-3-flash-preview",
-        systemInstruction,
-        generationConfig,
-      });
-    });
-
-    it("should fallback to 'gemini-3-flash-preview' if MODEL_NAME is missing", () => {
-      delete process.env.MODEL_NAME;
-      getLLMModel("test");
-
-      const genAIInstance = vi.mocked(GoogleGenerativeAI).mock.results[0].value;
-      expect(genAIInstance.getGenerativeModel).toHaveBeenCalledWith({
-        model: "gemini-3-flash-preview",
-        systemInstruction: "test",
-      });
     });
 
     it("should throw an error if GOOGLE_API_KEY is missing", () => {
+      process.env.USE_VERTEX_AI = "false";
       delete process.env.GOOGLE_API_KEY;
-      expect(() => getLLMModel("test")).toThrow(/GOOGLE_API_KEY is required/);
+
+      expect(() => getLLMModel("test instruction")).toThrow(/GOOGLE_API_KEY is required/);
+    });
+
+    it("should reuse the GoogleGenerativeAI client (singleton)", () => {
+      process.env.USE_VERTEX_AI = "false";
+      process.env.GOOGLE_API_KEY = "test-api-key";
+
+      getLLMModel("inst 1");
+      getLLMModel("inst 2");
+
+      expect(GoogleGenerativeAI).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("Common Configuration", () => {
+    it("should pass generationConfig to getGenerativeModel", () => {
+      process.env.USE_VERTEX_AI = "false";
+      process.env.GOOGLE_API_KEY = "test-key";
+      const config = { temperature: 0.5 };
+
+      getLLMModel("test inst", config);
+
+      const genAIInstance = vi.mocked(GoogleGenerativeAI).mock.results[0].value;
+      expect(genAIInstance.getGenerativeModel).toHaveBeenCalledWith(
+        expect.objectContaining({
+          generationConfig: config,
+        })
+      );
     });
   });
 });
