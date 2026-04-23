@@ -1,60 +1,64 @@
-# Security Audit Project
+# Security Audit Agent Platform
 
-This repository contains a modern, full-stack Security Audit system that uses AI to perform functional and security reviews of source code.
+![Security AI Guardian](./nanobanana-output/a_professional_and_futuristic_co.png)
 
-## 🏗️ Architecture
+A professional, multi-tenant platform for automated functional and security audits of source code. Powered by Google Gemini 3.1 Flash and designed for reliability on Google Cloud Platform.
 
-The system follows a decoupled client-server architecture:
+## 🏗️ Architecture Overview
 
-- **Frontend (React + Vite + Tailwind CSS)**: A modern, reactive web application that provides a unified interface for code submission. It supports direct pasting, file uploads, and Git repository URLs.
-- **Backend (Node.js/Express Agent)**: A specialized security service that processes various inputs, handles Git operations (cloning, file traversal), and interfaces with **Google Gemini 1.5 Flash** to generate comprehensive audit reports.
+The system is built as a distributed microservices platform, leveraging serverless computing and managed database services for high availability and security.
 
-### Workflow
-1. **Input Submission**: User provides code via the Frontend.
-2. **Preprocessing**: 
-   - For **Text/Files**: Content is sent directly to the backend.
-   - For **Git Repos**: The backend clones the repository to a secure temporary directory, traverses the file tree (ignoring noise), and aggregates the source code.
-3. **AI Analysis**: The processed code is sent to Gemini with a specialized system instruction defining its role as a Security Engineer.
-4. **Report Generation**: The AI returns a Markdown-formatted report.
-5. **Display**: The Frontend renders the report beautifully using `react-markdown`.
+![Platform Architecture](./nanobanana-output/a_technical_architecture_diagram.png)
+
+### Core Services
+- **Frontend (React + Vite + Tailwind)**: The command center. Users manage their GitHub integrations, view historical audit reports, and perform on-demand manual scans.
+- **Backend Agent (Node.js/Express)**: The intelligence hub. Responsible for code retrieval (Git cloning), multi-tenant state management (Firestore), secure credential storage (Secret Manager), and AI orchestration (Gemini).
+- **GitHub Bot (Node.js)**: The automation bridge. A lightweight webhook processor that handles incoming PR events and manages long-running analysis tasks via Cloud Tasks.
+
+## 🔄 Global Flows
+
+### 1. Automated PR Review Flow
+When a user pushes code to a Pull Request:
+1.  **Event**: GitHub sends a `pull_request` webhook to the Bot.
+2.  **Auth**: Bot verifies the HMAC signature and retrieves user config from Firestore.
+3.  **Queue**: Bot enqueues an analysis job in **Google Cloud Tasks** to ensure reliability.
+4.  **Process**: Cloud Task triggers the Bot's internal analysis endpoint.
+5.  **Audit**: Bot fetches the PR diff and requests a structured analysis from the Agent.
+6.  **AI**: Agent invokes Gemini 3.1 Flash with specialized security engineering instructions.
+7.  **Feedback**: Bot posts findings back to the PR as inline comments and a summary.
+
+### 2. Manual On-Demand Audit
+1.  **Input**: User provides code via the Frontend dashboard (text, file, or URL).
+2.  **Request**: Frontend calls the Agent's `/api/analyze` endpoint.
+3.  **Analysis**: Agent processes the input and performs the AI audit.
+4.  **Report**: Frontend renders a detailed Markdown report with security findings.
 
 ## 📁 Project Structure
 
-- **[`/agent`](./agent)**: Node.js/Express backend service.
-  - `src/server.js`: API endpoints and AI integration.
-  - `src/git-processor.js`: Logic for cloning and processing Git repositories.
-- **[`/frontend`](./frontend)**: React frontend application.
-  - `src/App.tsx`: Main application logic and UI.
+- **[`/agent`](./agent)**: The "Brain" - Analysis engine and multi-tenant API.
+- **[`/frontend`](./frontend)**: The "Portal" - React user dashboard.
+- **[`/github-bot`](./github-bot)**: The "Worker" - Webhook listener and queue manager.
+- **[`/docs`](./docs)**: Strategic guides for setup and deployment.
 
 ## 🚀 Getting Started
 
-### Prerequisites
-- Node.js 18+
-- A Google AI Studio API Key (set as `GOOGLE_API_KEY` in `agent/.env`)
-
-### 1. Start the Backend Agent
+### Local Setup
 ```bash
-cd agent
+# Install all dependencies
 npm install
-npm start
+
+# Start services (Requires local .env configuration)
+cd agent && npm run dev
+cd frontend && npm run dev
 ```
-The backend runs on `http://localhost:8080`.
 
-### 2. Start the Frontend
-```bash
-cd frontend
-npm install
-npm run dev
-```
-Open the provided URL (usually `http://localhost:5173`) in your browser.
+### Cloud Deployment
+For full production setup, see the **[Deployment Guide](./docs/deployment.md)**.
 
-### 3. Local Auth Bypass (Development & Testing)
-To bypass the Firebase login screen during local development:
-1. In `frontend/.env`, set `VITE_ENABLE_AUTH_BYPASS="true"`.
-2. Open your browser's console on `http://localhost:5173`.
-3. Run: `localStorage.setItem('E2E_BYPASS_TOKEN', '<your-identity-token>')`. 
-   *(You can get a token via `gcloud auth print-identity-token`)*.
-4. Refresh the page.
+## 🔒 Security Principles
+- **Credential Isolation**: GitHub Private Keys are stored in Google Cloud Secret Manager.
+- **Zero-Trust Webhooks**: Every webhook is verified using app-specific shared secrets.
+- **Atomic Operations**: All multi-step database updates use Firestore Transactions.
 
-## 🔒 Security Note
-This tool is for audit and educational purposes. Ensure you have permission to audit any code or repository you submit to the service.
+---
+&copy; 2026 Security Audit Agent &bull; Functional and Security Analysis for the AI Era.
