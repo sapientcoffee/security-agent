@@ -3,9 +3,10 @@
 ## 📋 Micro-Step Checklist
 - [x] Phase 1: Preparation & Dependencies
   - [x] Step 1.A: Install Vertex AI SDK
-- [ ] Phase 2: Provider Implementation
-  - [ ] Step 2.A: Implement `getLLMModel` logic
-  - [ ] Step 2.B: Write unit tests for Provider
+- [x] Phase 2: Provider Implementation
+  - [x] Step 2.A: Implement `getLLMModel` logic
+  - [x] Step 2.B: Write unit tests for Provider
+
 - [ ] Phase 3: Refactor Server
   - [ ] Step 3.A: Integrate `llm-provider.js` into `server.js`
   - [ ] Step 3.B: Verify End-to-End Functionality

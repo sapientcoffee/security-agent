@@ -1,18 +1,24 @@
-/**
- * LLM Provider Factory
- * 
- * Determines which LLM SDK to use based on environment configuration.
- * Supports:
- * 1. @google/generative-ai (AI Studio via API Key)
- * 2. @google-cloud/vertexai (Vertex AI via Application Default Credentials)
- */
+import { GoogleGenerativeAI } from "@google/generative-ai";
+import { VertexAI } from "@google-cloud/vertexai";
 
-/**
- * Initializes and returns the appropriate Generative Model instance.
- * @param {string} systemInstruction - The system instruction/prompt to apply to the model.
- * @returns {object} The model instance compatible with `generateContent({ contents, generationConfig })`.
- */
 export function getLLMModel(systemInstruction) {
-  // Implementation will go here
-  throw new Error('Not implemented');
+  if (process.env.USE_VERTEX_AI === "true") {
+    const vertexAI = new VertexAI({
+      project: process.env.VERTEX_PROJECT,
+      location: process.env.VERTEX_LOCATION || "us-central1",
+    });
+    return vertexAI.getGenerativeModel({
+      model: process.env.VERTEX_MODEL || "gemini-3.1-pro-preview",
+      systemInstruction,
+    });
+  } else {
+    if (!process.env.GOOGLE_API_KEY) {
+      throw new Error("GOOGLE_API_KEY is required for AI Studio provider.");
+    }
+    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+    return genAI.getGenerativeModel({
+      model: process.env.MODEL_NAME || "gemini-3-flash-preview",
+      systemInstruction,
+    });
+  }
 }
