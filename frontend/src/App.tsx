@@ -11,10 +11,11 @@
 // limitations under the License.
 
 import { useState, useRef } from 'react';
-import axios from 'axios';
-import apiClient from './api/axios';
 import ReactMarkdown from 'react-markdown';
-import { Shield, Code, Github, FileUp, Loader2, Send, AlertTriangle, LogOut } from 'lucide-react';
+import { Shield, Code, Github, FileUp, Loader2, Send, AlertTriangle, LogOut, Menu, Plus } from 'lucide-react';
+import { AnalysisProgress } from './components/AnalysisProgress';
+import { AuditHistorySidebar } from './components/AuditHistorySidebar';
+import { CodeBlock } from './components/CodeBlock';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { useAuth } from './contexts/AuthContext';
@@ -61,6 +62,7 @@ export default function App() {
     return [];
   });
   const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -104,25 +106,82 @@ export default function App() {
     setReport(null);
 
     try {
-      const response = await apiClient.post('/api/analyze', {
-        inputType: inputType === 'file' ? 'text' : inputType,
-        content
+      const token = localStorage.getItem('E2E_BYPASS_TOKEN');
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+      };
+      
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+
+      const baseUrl = import.meta.env.VITE_API_URL || '';
+      const response = await fetch(`${baseUrl}/api/analyze`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          inputType: inputType === 'file' ? 'text' : inputType,
+          content
+        })
       });
-      setReport(response.data.report);
+
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(text || `HTTP error! status: ${response.status}`);
+      }
+
+      if (!response.body) {
+        throw new Error('Response body is null');
+      }
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder('utf-8');
+      let done = false;
+      let buffer = '';
+
+      while (!done) {
+        const { value, done: readerDone } = await reader.read();
+        done = readerDone;
+
+        if (value) {
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split('\n');
+          
+          buffer = lines.pop() || '';
+          
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const dataStr = line.slice(6);
+              if (!dataStr.trim()) continue;
+
+              try {
+                const event = JSON.parse(dataStr);
+                
+                if (event.status === 'cloning' || event.status === 'parsing' || event.status === 'analyzing') {
+                  setAuditStatus(event.status);
+                } else if (event.status === 'completed') {
+                  setReport(event.report);
+                  saveToHistory(event.report, content, inputType);
+                  setAuditStatus('completed');
+                } else if (event.status === 'error') {
+                  setError(event.message || 'An error occurred during analysis.');
+                  setAuditStatus('error');
+                }
+              } catch (e) {
+                console.error('Failed to parse SSE JSON:', e, 'Raw data:', dataStr);
+              }
+            }
+          }
+        }
+      }
     } catch (err: unknown) {
       console.error(err);
-      if (axios.isAxiosError(err)) {
-        setError(err.response?.data?.message || err.message || 'An unexpected error occurred during analysis.');
-      } else {
-        setError(err instanceof Error ? err.message : 'An unexpected error occurred during analysis.');
-      }
+      setError(err instanceof Error ? err.message : 'An unexpected error occurred during analysis.');
+      setAuditStatus('error');
     } finally {
       setIsAnalyzing(false);
     }
   };
-
-  // Temporarily suppress unused variable warnings
-  console.log(auditStatus, setAuditStatus, history, selectedHistoryId, setSelectedHistoryId, saveToHistory);
 
   if (loading) {
     return (
@@ -169,11 +228,54 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-900 font-sans selection:bg-blue-100 w-full flex flex-col items-center py-12 px-4">
+      <AuditHistorySidebar
+        history={history}
+        selectedId={selectedHistoryId}
+        isOpen={isSidebarOpen}
+        onClose={() => setIsSidebarOpen(false)}
+        onSelect={(record) => {
+          setSelectedHistoryId(record.id);
+          setReport(record.report);
+          setIsSidebarOpen(false);
+        }}
+        onDelete={(id) => {
+          setHistory(prev => {
+            const updated = prev.filter(h => h.id !== id);
+            localStorage.setItem('auditHistory', JSON.stringify(updated));
+            return updated;
+          });
+          if (selectedHistoryId === id) {
+            setSelectedHistoryId(null);
+            setReport(null);
+          }
+        }}
+      />
       <div className="max-w-4xl w-full space-y-8">
-        <div className="flex justify-end">
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsSidebarOpen(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+            >
+              <Menu size={18} />
+              History
+            </button>
+            <button
+              onClick={() => {
+                setSelectedHistoryId(null);
+                setReport(null);
+                setAuditStatus('idle');
+              }}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"
+              title="Start a new audit"
+            >
+              <Plus size={18} />
+              New Audit
+            </button>
+          </div>
           <button
             onClick={() => firebaseAuth.signOut()}
-            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 transition-colors"
+            className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-600 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
           >
             <LogOut size={18} />
             Sign Out
@@ -197,6 +299,7 @@ export default function App() {
         <GitHubSetup mode="config" />
 
         {/* Main Interface */}
+        {!selectedHistoryId && (
         <main className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
           {/* Tabs */}
           <div className="flex flex-wrap gap-2 p-4 border-b border-gray-100 bg-gray-50/50">
@@ -296,6 +399,10 @@ export default function App() {
             </button>
           </div>
         </main>
+        )}
+
+        {/* Analysis Progress */}
+        <AnalysisProgress status={auditStatus} />
 
         {/* Results Area */}
         {report && (
@@ -319,11 +426,19 @@ export default function App() {
                   ul: ({node: _node, ...props}) => <ul className="list-disc pl-6 mb-4 space-y-2 text-gray-700" {...props} />,
                   li: ({node: _node, ...props}) => <li {...props} />,
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  code: ({node: _node, inline, ...props}: any) => (
-                    inline 
-                      ? <code className="bg-gray-100 text-red-600 px-1.5 py-0.5 rounded font-mono text-sm" {...props} />
-                      : <div className="bg-gray-900 rounded-xl p-4 my-4 overflow-x-auto"><code className="text-gray-100 font-mono text-sm" {...props} /></div>
-                  ),
+                  code: ({node: _node, inline, className, children, ...props}: any) => {
+                    const match = /language-(\w+)/.exec(className || '');
+                    return !inline ? (
+                      <CodeBlock 
+                        language={match ? match[1] : 'text'} 
+                        value={String(children).replace(/\n$/, '')} 
+                      />
+                    ) : (
+                      <code className="bg-gray-100 text-red-600 px-1.5 py-0.5 rounded font-mono text-sm" {...props}>
+                        {children}
+                      </code>
+                    );
+                  },
                   blockquote: ({node: _node, ...props}) => <blockquote className="border-l-4 border-blue-500 pl-4 italic text-gray-600 my-6" {...props} />
                 }}
               >

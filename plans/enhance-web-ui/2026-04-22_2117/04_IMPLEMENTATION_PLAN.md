@@ -18,8 +18,8 @@ The following new components will be created in the frontend workspace to suppor
   - [x] Step 3.B: Build `AuditHistorySidebar.tsx` (history menu).
   - [x] Step 3.C: Build `CodeBlock.tsx` (syntax highlighting & copy action).
 - [ ] **Phase 4: Integration**
-  - [ ] Step 4.A: Integrate SSE consumption logic in `App.tsx`.
-  - [ ] Step 4.B: Assemble new components into the main layout of `App.tsx`.
+  - [x] Step 4.A: Integrate SSE consumption logic in `App.tsx`.
+  - [x] Step 4.B: Assemble new components into the main layout of `App.tsx`.
 
 ## 📝 Step-by-Step Implementation Details
 
