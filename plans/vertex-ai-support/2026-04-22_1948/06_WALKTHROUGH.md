@@ -14,7 +14,7 @@ The `vertex-ai-support` feature introduces a provider-based abstraction for LLM 
 ### Landing Page
 The Security Audit Agent UI remains functional and unaffected by the backend provider refactor.
 
-![Landing Page](/plans/vertex-ai-support/2026-04-22_1948/01_landing_page.png)
+![Landing Page](plans/vertex-ai-support/2026-04-22_1948/01_landing_page.png)
 
 ## Verification Steps
 1.  **Unit Testing:** Verified provider logic with 6 dedicated unit tests in `agent/tests/llm-provider.test.js`.
