@@ -99,29 +99,37 @@ app.get("/agent-card", (req, res) => {
 });
 
 app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
-  const { inputType, content, structured } = req.body;
-  let codeToAnalyze = "";
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
 
-  if (inputType === 'git') {
-    logger.info(`Processing git repo: ${content}`, { module: 'git' });
-    codeToAnalyze = await processGitRepo(content);
-  } else {
-    codeToAnalyze = content;
-  }
+  try {
+    const { inputType, content, structured } = req.body;
+    let codeToAnalyze = "";
 
-  if (!codeToAnalyze) {
-    const error = new Error("No code provided for analysis");
-    error.status = 400;
-    throw error;
-  }
+    if (inputType === 'git') {
+      logger.info(`Processing git repo: ${content}`, { module: 'git' });
+      codeToAnalyze = await processGitRepo(content, (status) => {
+        res.write(`data: ${JSON.stringify({ status })}\n\n`);
+      });
+    } else {
+      codeToAnalyze = content;
+    }
 
-  logger.info("Calling LLM Provider for security analysis...", { module: 'ai', structured });
+    if (!codeToAnalyze) {
+      res.write(`data: ${JSON.stringify({ status: 'error', message: 'No code provided for analysis' })}\n\n`);
+      return res.end();
+    }
 
-  let systemInstruction = "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.";
-  let generationConfig = {};
+    res.write(`data: ${JSON.stringify({ status: 'analyzing' })}\n\n`);
+    logger.info("Calling LLM Provider for security analysis...", { module: 'ai', structured });
 
-  if (structured) {
-    systemInstruction = `You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. 
+    let systemInstruction = "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.";
+    let generationConfig = {};
+
+    if (structured) {
+      systemInstruction = `You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. 
       Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 
       Output Format: You MUST return a JSON object with the following schema:
       {
@@ -134,30 +142,34 @@ app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
           }
         ]
       }`;
-    generationConfig = {
-      responseMimeType: "application/json",
-    };
-  }
-
-  const model = getLLMModel(systemInstruction, generationConfig);
-
-  const result = await model.generateContent(codeToAnalyze);
-  const response = await result.response;
-  const output = response.text();
-
-  if (structured) {
-    try {
-      const parsed = safeJsonParse(output);
-      return res.json(parsed);
-    } catch (e) {
-      logger.error("Failed to parse structured output from AI", { output, error: e.message });
-      const error = new Error("Failed to generate structured output");
-      error.status = 500;
-      throw error;
+      generationConfig = {
+        responseMimeType: "application/json",
+      };
     }
-  }
 
-  res.json({ report: output });
+    const model = getLLMModel(systemInstruction, generationConfig);
+
+    const result = await model.generateContent(codeToAnalyze);
+    const response = await result.response;
+    const output = response.text();
+
+    if (structured) {
+      try {
+        const parsed = safeJsonParse(output);
+        res.write(`data: ${JSON.stringify({ status: 'completed', report: parsed })}\n\n`);
+      } catch (e) {
+        logger.error("Failed to parse structured output from AI", { output, error: e.message });
+        res.write(`data: ${JSON.stringify({ status: 'error', message: 'Failed to generate structured output' })}\n\n`);
+      }
+    } else {
+      res.write(`data: ${JSON.stringify({ status: 'completed', report: output })}\n\n`);
+    }
+  } catch (error) {
+    logger.error("Analysis error:", { error: error.message });
+    res.write(`data: ${JSON.stringify({ status: 'error', message: error.message })}\n\n`);
+  } finally {
+    res.end();
+  }
 }));
 
 app.post("/v1/message:send", verifyToken, asyncHandler(async (req, res) => {

@@ -9,7 +9,7 @@ The following new components will be created in the frontend workspace to suppor
 ## 📋 Micro-Step Checklist
 - [ ] **Phase 1: Backend SSE Implementation**
   - [x] Step 1.A: Update `agent/src/git-processor.js` to accept and fire progress events.
-  - [ ] Step 1.B: Update `agent/src/server.js` to support SSE streaming (via POST + chunked transfer).
+  - [x] Step 1.B: Update `agent/src/server.js` to support SSE streaming (via POST + chunked transfer).
 - [ ] **Phase 2: Frontend State & Storage**
   - [ ] Step 2.A: Install `react-syntax-highlighter`.
   - [ ] Step 2.B: Implement LocalStorage persistence and `auditStatus` state in `App.tsx`.
