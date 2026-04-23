@@ -16,7 +16,8 @@ An LLM will perform better on a task when its' context window is full of focused
 This file describes common mistakes and confusion points that agents might encounter as they work in this project.
 
 ## Deployment Workflow
-- **Backend (Agent):** Deploy first to obtain URL. Use `gcloud run deploy security-audit-agent --source ./agent --set-env-vars GOOGLE_API_KEY=...,GOOGLE_CLOUD_PROJECT=...`
+- **Secrets:** Store `GOOGLE_API_KEY` in Secret Manager.
+- **Backend (Agent):** Deploy first to obtain URL. Use `gcloud run deploy security-audit-agent --source ./agent --set-secrets GOOGLE_API_KEY=GOOGLE_API_KEY:latest --set-env-vars GOOGLE_CLOUD_PROJECT=...`
 - **GitHub Bot:** Deploy second. Use `gcloud builds submit` then `gcloud run deploy` with `AGENT_API_URL` and `AGENT_API_TOKEN`.
 - **Frontend (UI):** Build with `gcloud builds submit` to bake in `VITE_API_URL`.
 

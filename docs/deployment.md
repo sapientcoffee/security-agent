@@ -24,13 +24,22 @@ The Agent must be deployed first. It requires permissions to manage secrets in S
 ```bash
 cd agent
 
-# Build and deploy
+# 1a. Create the secret in Secret Manager
+printf "YOUR_GEMINI_KEY" | gcloud secrets create GOOGLE_API_KEY --data-file=-
+
+# 1b. Grant access to the service account
+gcloud secrets add-iam-policy-binding GOOGLE_API_KEY \
+  --member="serviceAccount:[PROJECT_NUMBER]-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+
+# 1c. Build and deploy
 gcloud run deploy security-audit-agent \
   --source . \
   --platform managed \
   --region us-central1 \
   --allow-unauthenticated \
-  --set-env-vars="GOOGLE_API_KEY=YOUR_GEMINI_KEY,GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID"
+  --set-secrets="GOOGLE_API_KEY=GOOGLE_API_KEY:latest" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=YOUR_PROJECT_ID"
 ```
 **Note the Service URL:** `https://security-audit-agent-xxxx.run.app`
 
