@@ -55,3 +55,4 @@ This file describes common mistakes and confusion points that agents might encou
 | **Commits** | Use format: `feat(<feature-name>): <task summary>` | Committing without running `npm run lint` and `npm run test:e2e`. |
 | **Comments** | Never remove a comment unless it is specific to the changes you are making. | Deleting original comments or instructions while refactoring. |
 | **Deployment** | Always use `gcloud builds submit` with substitutions for the frontend to ensure env vars are baked in. | Never deploy the frontend from source using `gcloud run deploy --source` as build-args will be ignored. |
+| **Secrets** | Always use `--set-secrets` to mount `GOOGLE_API_KEY` from Secret Manager. | Never pass the `GOOGLE_API_KEY` as a plain-text environment variable in production. |
