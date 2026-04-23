@@ -22,11 +22,12 @@ import logger from './utils/logger.js';
  * collects source code from relevant files, and returns it as a string.
  * Cleans up the temporary directory afterwards.
  */
-export async function processGitRepo(repoUrl) {
+export async function processGitRepo(repoUrl, onProgress = () => {}) {
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'git-analyze-'));
   const git = simpleGit();
 
   try {
+    onProgress('cloning');
     logger.info(`Cloning repository: ${repoUrl} into ${tempDir}`, { module: 'git' });
     await git.clone(repoUrl, tempDir, ['--depth', '1']);
 
@@ -48,6 +49,8 @@ export async function processGitRepo(repoUrl) {
       '**/*.exe',
       '**/*.bin'
     ];
+
+    onProgress('parsing');
 
     // Find all files, excluding ignored ones
     const files = await glob('**/*', {
