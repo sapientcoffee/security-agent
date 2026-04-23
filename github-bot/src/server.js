@@ -75,6 +75,7 @@ app.use((req, res, next) => {
 import { getSecret } from './lib/secrets.js';
 import { enqueueAnalysis } from './lib/tasks.js';
 import { verifyTaskToken } from './middleware/auth.js';
+import { validateBody, taskProcessPrSchema } from './middleware/validate.js';
 
 // Helper to retrieve GitHub App config from Firestore
 async function getAppConfig(appId) {
@@ -169,15 +170,9 @@ app.get('/health', (req, res) => {
  * Cloud Tasks handler for processing PR reviews.
  * This ensures reliability in serverless environments like Cloud Run.
  */
-app.post('/task/process-pr', verifyTaskToken, asyncHandler(async (req, res) => {
+app.post('/task/process-pr', verifyTaskToken, validateBody(taskProcessPrSchema), asyncHandler(async (req, res) => {
   const { payload, appId, appConfig, traceId } = req.body;
   
-  if (!payload || !appId || !appConfig) {
-    const error = new Error('Missing required task payload');
-    error.status = 400;
-    throw error;
-  }
-
   const owner = payload.repository.owner.login;
   const repo = payload.repository.name;
   const pull_number = payload.pull_request.number;

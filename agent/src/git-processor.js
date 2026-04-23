@@ -16,6 +16,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import logger from './utils/logger.js';
+import { validateGitUrl } from './utils/validation.js';
 
 /**
  * Clones a git repository into a temporary directory,
@@ -23,6 +24,11 @@ import logger from './utils/logger.js';
  * Cleans up the temporary directory afterwards.
  */
 export async function processGitRepo(repoUrl, onProgress = () => {}) {
+  // Security Fix: Validate URL to prevent SSRF and Command Injection
+  if (!validateGitUrl(repoUrl)) {
+    throw new Error('Invalid or restricted Git repository URL provided');
+  }
+
   const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), 'git-analyze-'));
   const git = simpleGit();
 

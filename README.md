@@ -50,6 +50,10 @@ When a user pushes code to a Pull Request:
 2.  **Execution**: The CLI connects directly to the **Backend Agent**'s secure Cloud Run endpoint (utilizing the [Remote Configuration](.gemini/agents/security-auditor.md) as a bridge).
 3.  **Result**: The AI-driven analysis is streamed back directly to the developer's terminal in real-time.
 
+## 📺 Demo
+
+[![Security Audit Agent Demo](https://img.youtube.com/vi/slhhe9_lRtQ/0.jpg)](https://www.youtube.com/watch?v=slhhe9_lRtQ)
+
 ## 📁 Project Structure
 
 - **[`/agent`](./agent)**: The "Brain" - Analysis engine and multi-tenant API.

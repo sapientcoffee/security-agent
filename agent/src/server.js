@@ -26,11 +26,30 @@ dotenv.config();
 
 import { safeJsonParse } from './utils/ai-utils.js';
 import { upsertSecret } from './lib/secrets.js';
+import { 
+  validateBody, 
+  analyzeSchema, 
+  messageSendSchema, 
+  finalizeSetupSchema 
+} from './middleware/validate.js';
 
 const db = admin.firestore();
 const app = express();
 app.use(express.json({ limit: '10mb' }));
-app.use(cors());
+
+// Security Fix: Restrict CORS to trusted origins
+const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : ['*'];
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true
+}));
 
 // Helper to mask sensitive HTTP headers in logs
 const sanitizeHeaders = (headers) => {
@@ -89,16 +108,22 @@ app.use((req, res, next) => {
 const PORT = process.env.PORT || 8080;
 
 app.get("/agent-card", (req, res) => {
-  // Construct absolute base URL, ensuring HTTPS if behind a proxy like Cloud Run
-  const protocol = req.get('x-forwarded-proto') || req.protocol;
-  const host = req.get('host');
-  const baseUrl = `${protocol}://${host}`;
-  
+  // Security Fix: Prefer hardcoded BASE_URL to prevent Host Header Injection
+  // Fallback to dynamic host only if APP_BASE_URL is not provided
+  let baseUrl = process.env.APP_BASE_URL;
+
+  if (!baseUrl) {
+    const protocol = req.get('x-forwarded-proto') || req.protocol;
+    const host = req.get('host');
+    baseUrl = `${protocol}://${host}`;
+    logger.warn(`APP_BASE_URL not set, falling back to dynamic baseUrl: ${baseUrl}`);
+  }
+
   logger.debug(`Generating agent card with baseUrl: ${baseUrl}`);
   res.json(getAgentCard(baseUrl));
 });
 
-app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
+app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), asyncHandler(async (req, res) => {
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -186,7 +211,7 @@ app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
   }
 }));
 
-app.post("/v1/message:send", verifyToken, asyncHandler(async (req, res) => {
+app.post("/v1/message:send", verifyToken, validateBody(messageSendSchema), asyncHandler(async (req, res) => {
   const { message, text } = req.body;
   let input = "";
 
@@ -321,15 +346,9 @@ app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
 /**
  * Exchange GitHub App Manifest code for credentials and store them in Firestore.
  */
-app.post("/api/github/finalize-setup", verifyToken, asyncHandler(async (req, res) => {
+app.post("/api/github/finalize-setup", verifyToken, validateBody(finalizeSetupSchema), asyncHandler(async (req, res) => {
   const { code } = req.body;
   const uid = req.user.uid;
-
-  if (!code) {
-    const error = new Error('Missing code parameter');
-    error.status = 400;
-    throw error;
-  }
 
   logger.info(`Finalizing GitHub setup for user ${uid}...`);
 

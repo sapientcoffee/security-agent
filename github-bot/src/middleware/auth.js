@@ -30,8 +30,8 @@ export const verifyTaskToken = asyncHandler(async (req, res, next) => {
     // Cloud Tasks sends this token when configured with oidcToken.
     const ticket = await client.verifyIdToken({
       idToken: token,
-      // We could optionally verify the audience (aud) here if we know the bot's URL
-      // audience: process.env.BOT_URL 
+      // Security Fix: Verify the audience (aud) matches our Bot's URL
+      audience: process.env.BOT_URL 
     });
     const payload = ticket.getPayload();
     

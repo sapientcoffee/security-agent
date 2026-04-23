@@ -12,6 +12,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
+import rehypeSanitize from 'rehype-sanitize';
 import { Shield, Code, Github, FileUp, Loader2, Send, AlertTriangle, LogOut, Menu, Plus } from 'lucide-react';
 import { AnalysisProgress } from './components/AnalysisProgress';
 import { AuditHistorySidebar } from './components/AuditHistorySidebar';
@@ -519,9 +520,9 @@ export default function App() {
                   </div>
                 </div>
                 <div className="p-8 prose prose-slate max-w-none">
-                  <ReactMarkdown 
-                    components={{
-                      h1: ({node: _node, ...props}) => <h1 className="text-3xl font-bold mt-6 mb-4 border-b pb-2" {...props} />,
+                  <ReactMarkdown
+                                      rehypePlugins={[rehypeSanitize]}
+                                      components={{                      h1: ({node: _node, ...props}) => <h1 className="text-3xl font-bold mt-6 mb-4 border-b pb-2" {...props} />,
                       h2: ({node: _node, ...props}) => <h2 className="text-2xl font-bold mt-6 mb-3" {...props} />,
                       h3: ({node: _node, ...props}) => <h3 className="text-xl font-bold mt-5 mb-2" {...props} />,
                       p: ({node: _node, ...props}) => <p className="mb-4 text-gray-700 leading-relaxed" {...props} />,
