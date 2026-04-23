@@ -1,5 +1,7 @@
 # Walkthrough: Vertex AI Support
 
+Closes #1
+
 ## Technical Summary
 The `vertex-ai-support` feature introduces a provider-based abstraction for LLM interactions. By refactoring the direct dependency on Google AI Studio into a factory pattern, the agent can now dynamically switch between **Google AI Studio** and **Google Cloud Vertex AI** based on environment configuration.
 
