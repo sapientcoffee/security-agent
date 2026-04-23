@@ -16,19 +16,20 @@ An LLM will perform better on a task when its' context window is full of focused
 This file describes common mistakes and confusion points that agents might encounter as they work in this project.
 
 ## Deployment Workflow
-- **Backend (Agent):** Deploy first to obtain URL. Use `gcloud run deploy security-audit-agent --source ./agent --set-env-vars GOOGLE_API_KEY=...`
-- **GitHub Bot:** Use `gcloud builds submit` to build image, then `gcloud run deploy` with environment variables.
-- **Frontend (UI):** Must be built using `gcloud builds submit` to ensure build-time arguments (VITE_API_URL, Firebase config) are baked into the image. Use the `frontend/cloudbuild.yaml`.
-- **CORS:** Ensure `app.use(cors())` is present in `agent/src/server.js` to allow the frontend to communicate with the backend across different Cloud Run URLs.
+- **Backend (Agent):** Deploy first to obtain URL. Use `gcloud run deploy security-audit-agent --source ./agent --set-env-vars GOOGLE_API_KEY=...,GOOGLE_CLOUD_PROJECT=...`
+- **GitHub Bot:** Deploy second. Use `gcloud builds submit` then `gcloud run deploy` with `AGENT_API_URL` and `AGENT_API_TOKEN`.
+- **Frontend (UI):** Build with `gcloud builds submit` to bake in `VITE_API_URL`.
+
+## Architecture & Multi-Tenancy
+- **Firestore Schema:** 
+  - `github_apps/{appId}`: Multi-tenant bot credentials.
+  - `github_reviews/`: Audit history logs.
+- **Trace Correlation:** Use `AsyncLocalStorage` and `X-Cloud-Trace-Context` header to link Bot -> Agent logs.
 
 ## Setup & Developer Environment
-<!-- Gemini will work out dependencies from the codebase (e.g. package.json). Hardcoding in here is like having stale docs -->
-- **Install:** `npm install` (Do NOT use pnpm or yarn)
-- **Start Backend (Agent):** `cd agent && npm start`
-- **Start GitHub Bot:** `cd github-bot && npm start`
-- **Start Frontend:** `npm run dev`
-- **Keys:** Requires `TEST_SA_KEY_PATH` or `.keys/test-sa.json` for E2E testing (see `docs/local-testing.md`).
-- **GitHub Secrets:** Requires `GITHUB_APP_ID`, `GITHUB_PRIVATE_KEY`, and `GITHUB_WEBHOOK_SECRET` for the bot.
+- **Install:** `npm install` (No pnpm/yarn)
+- **Firebase:** Requires project with Firestore enabled.
+- **Auth:** Uses Firebase Auth (Frontend) and Cloud Identity tokens (Backend).
 
 ## Deep Context (Progressive Disclosure)
 <!-- The Gemini CLI executes a downward Breadth-First-Search (BFS) scan through your project, grabbing context files from subdirectories (up to a limit of 200 folders) and layering them over the root file. Ensure this root file remains strictly for global mandates, and rely heavily on nested GEMINI.md files in your sub-folders for component-specific instructions, as those will be appended closer to the active user prompt  -->

@@ -1,82 +1,63 @@
 # Security Audit Remote Agent
 
-This is a remote subagent for Gemini CLI that performs security audits and QA checks. It uses **Google AI Studio** for low-latency, simple alternative testing.
+The core analysis engine of the Security Audit Platform. This service processes code, performs security audits using Gemini, and manages multi-tenant configuration in Firestore.
 
-## Deployment to Google Cloud Run
+## 🚀 Key Features
+- **AI-Powered Audits:** Uses **Gemini 3.1 Flash** for functional and security reviews.
+- **Multi-Tenant:** Securely stores and retrieves user-specific GitHub App configurations.
+- **Git Integration:** Clones and traverses repositories to aggregate source code for analysis.
+- **History Tracking:** Stores a searchable history of GitHub PR reviews.
 
-1.  **Build and Push the Container**:
-    Use Cloud Build to build and push the container to Artifact Registry or GCR.
+## 📡 API Endpoints
+
+### Core Analysis
+- **`POST /api/analyze`**: Performs a security analysis.
+  - **Payload**: `{ "inputType": "text" | "git", "content": string }`
+  - **Response**: `{ "report": string }`
+
+### GitHub Integration (Authenticated)
+- **`GET /api/github/config`**: Retrieves the user's current GitHub App status.
+- **`POST /api/github/finalize-setup`**: Exchanges a GitHub Manifest code for credentials.
+- **`GET /api/github/reviews`**: Fetches the user's history of automated reviews.
+- **`DELETE /api/github/config`**: Securely deletes the user's integration and history.
+
+## 📦 Deployment (Cloud Run)
+
+1.  **Build and Push**:
     ```bash
-    gcloud builds submit --tag gcr.io/[YOUR_PROJECT_ID]/security-audit-agent .
+    gcloud builds submit --tag gcr.io/[PROJECT_ID]/security-audit-agent .
     ```
 
-2.  **Deploy to Cloud Run**:
-    Ensure you have a `GOOGLE_API_KEY` from [Google AI Studio](https://aistudio.google.com/app/apikey).
+2.  **Deploy**:
     ```bash
     gcloud run deploy security-audit-agent \
-      --image gcr.io/[YOUR_PROJECT_ID]/security-audit-agent \
+      --image gcr.io/[PROJECT_ID]/security-audit-agent \
       --platform managed \
       --region us-central1 \
       --allow-unauthenticated \
-      --set-env-vars GOOGLE_API_KEY=[YOUR_API_KEY]
+      --set-env-vars GOOGLE_API_KEY=[YOUR_API_KEY],GOOGLE_CLOUD_PROJECT=[YOUR_PROJECT_ID]
     ```
 
-3.  **Register the Remote Agent in Gemini CLI**:
-    Create or update your `.gemini/agents/security-auditor.md` with the Cloud Run URL.
+## 🛠 Local Development
 
-    ```markdown
-    ---
-    kind: remote
-    name: security-auditor
-    agent_card_url: https://[YOUR_CLOUD_RUN_URL]/agent-card
-    auth:
-      type: none # Authentication to AI Studio is handled internally via API Key
-    ---
-    ```
+1. **Install Dependencies**:
+   ```bash
+   npm install
+   ```
 
-## API Endpoints
+2. **Environment Variables**:
+   Create a `.env` file in `/agent`:
+   ```env
+   GOOGLE_API_KEY=your_key
+   GOOGLE_CLOUD_PROJECT=your_project_id
+   PORT=8080
+   ```
 
-- **`POST /api/analyze`**: Performs a security analysis on the provided code or Git repository.
-  - **Payload**: `{ "inputType": "text" | "git", "content": string }`
-  - **Response**: `{ "report": string }` (Markdown-formatted audit report).
-- **`GET /agent-card`**: Returns the remote agent configuration for Gemini CLI.
-- **`POST /v1/message:send`**: Generic agent message endpoint.
+3. **Run Server**:
+   ```bash
+   npm run dev
+   ```
 
-## Architecture & Features
+## 🧠 Architecture
 
-### Git Processing
-The agent uses `simple-git` and `glob` to:
-1.  **Clone**: Repositories are cloned into a temporary system directory (`os.tmpdir()`).
-2.  **Filter**: It automatically ignores binary files, dependencies (`node_modules`), and version control metadata (`.git`).
-3.  **Analyze**: All discovered source code files are aggregated into a single context-rich string for analysis by the Gemini model.
-4.  **Cleanup**: The temporary directory is recursively deleted after analysis, even in the case of failures.
-
-### AI Integration
-The agent is configured to use **Gemini 1.5 Flash** with a specialized system instruction that defines its persona as a "Specialized QA and Security Engineer." This instruction guides the model to perform:
-- Functional Assessment
-- Bug Hunting
-- Detailed Security Audits
-
-## Local Development
-
-1.  Install dependencies:
-    ```bash
-    npm install
-    ```
-
-2.  Configure Environment:
-    Create a `.env` file in the project root directory:
-    ```
-    GOOGLE_API_KEY=your_api_key_here
-    PORT=8080
-    ```
-
-3.  Run the server:
-    ```bash
-    npm run dev
-    ```
-
-4.  Test the agent-card endpoint:
-    ```bash
-    curl http://localhost:8080/agent-card
-    ```
+The agent uses a combination of **Firebase Admin SDK** for database operations and **Google Cloud Identity** for secure request validation. It is designed to be stateless and scales horizontally on Cloud Run.

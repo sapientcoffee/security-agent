@@ -147,7 +147,7 @@ export default function App() {
         </header>
 
         {/* GitHub Setup Section */}
-        <GitHubSetup />
+        <GitHubSetup mode="config" />
 
         {/* Main Interface */}
         <main className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
@@ -285,6 +285,9 @@ export default function App() {
             </div>
           </section>
         )}
+
+        {/* GitHub Review History (Bottom) */}
+        <GitHubSetup mode="history" />
       </div>
       
       <footer className="mt-12 text-gray-400 text-sm">

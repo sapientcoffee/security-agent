@@ -257,6 +257,31 @@ app.get("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * Get the current user's GitHub review history.
+ */
+app.get("/api/github/reviews", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  
+  const snapshot = await db.collection('github_reviews')
+    .where('ownerUid', '==', uid)
+    .orderBy('timestamp', 'desc')
+    .limit(20)
+    .get();
+  
+  const reviews = [];
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    reviews.push({ 
+      id: doc.id, 
+      ...data,
+      timestamp: data.timestamp?.toDate() || null
+    });
+  });
+  
+  res.json(reviews);
+}));
+
+/**
  * Delete the current user's GitHub App configuration and references.
  */
 app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {

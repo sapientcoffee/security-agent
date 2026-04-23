@@ -83,47 +83,6 @@ async function getAppConfig(appId) {
   return doc.data();
 }
 
-// Function to update Cloud Run environment variables (Self-Configuration)
-async function updateCloudRunConfig(newEnv) {
-  const auth = new GoogleAuth({
-    scopes: 'https://www.googleapis.com/auth/cloud-platform'
-  });
-  const client = await auth.getClient();
-  const projectId = await auth.getProjectId();
-  const serviceName = process.env.K_SERVICE || 'github-security-bot';
-  const region = 'us-central1';
-  
-  const url = `https://${region}-run.googleapis.com/v2/projects/${projectId}/locations/${region}/services/${serviceName}`;
-  const getResponse = await client.request({ url });
-  const service = getResponse.data;
-
-  const newEnvArray = Object.entries(newEnv).map(([name, value]) => ({ name, value }));
-  const currentEnv = service.template.containers[0].env || [];
-  const updatedEnv = [...currentEnv];
-  
-  for (const newVar of newEnvArray) {
-    const index = updatedEnv.findIndex(v => v.name === newVar.name);
-    if (index !== -1) {
-      updatedEnv[index] = newVar;
-    } else {
-      updatedEnv.push(newVar);
-    }
-  }
-
-  service.template.containers[0].env = updatedEnv;
-  
-  // Clean up read-only/immutable fields for PATCH
-  const deleteFields = ['status', 'uri', 'reconciling', 'etag', 'uid', 'createTime', 'updateTime', 'deleteTime', 'expireTime', 'creator', 'lastModifier'];
-  deleteFields.forEach(f => delete service[f]);
-
-  logger.info('Updating Cloud Run service with new credentials...', { serviceName });
-  await client.request({
-    url,
-    method: 'PATCH',
-    data: service
-  });
-}
-
 // Serve the app creation manifest at the root
 app.get('/', (req, res) => {
   res.sendFile(path.join(__dirname, '../create-app.html'));
@@ -159,14 +118,6 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
 
   logger.info('Converted GitHub Manifest code to credentials', { appId });
 
-  if (process.env.K_SERVICE) {
-    updateCloudRunConfig({
-      GITHUB_APP_ID: appId,
-      GITHUB_WEBHOOK_SECRET: webhookSecret,
-      GITHUB_PRIVATE_KEY: privateKey
-    }).catch(err => logger.error('Auto-update failed', { error: err.message }));
-  }
-
   res.status(200).send(`
     <!DOCTYPE html>
     <html lang="en">
@@ -176,36 +127,17 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
         <style>
             body { font-family: -apple-system, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 20px; color: #24292e; text-align: center; }
             .card { border: 1px solid #e1e4e8; border-radius: 6px; padding: 40px; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
-            .loader { border: 4px solid #f3f3f3; border-top: 4px solid #2ea44f; border-radius: 50%; width: 40px; height: 40px; animation: spin 2s linear infinite; margin: 20px auto; }
-            @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
             h1 { color: #2ea44f; }
-            .success-content { display: none; }
         </style>
     </head>
     <body>
         <div class="card">
-            <div id="loading">
-                <h1>⚙️ Configuring Your Bot...</h1>
-                <p>We've received your GitHub credentials. The bot is now automatically updating its own configuration in Cloud Run.</p>
-                <div class="loader"></div>
-                <p><small>This will trigger a service restart. Please wait about 30 seconds.</small></p>
-            </div>
-
-            <div id="success" class="success-content">
-                <h1>✅ Setup Complete!</h1>
-                <p>Your bot is now fully configured and live.</p>
-                <p>The final step is to install the app on your repositories:</p>
-                <a href="${appConfig.html_url}/installations/new" style="background: #2ea44f; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 20px;">Install Bot on Repositories</a>
-                <button onClick="window.close()" class="block w-full text-sm text-gray-500 font-medium hover:underline mt-4">Close Window</button>
-            </div>
+            <h1>✅ Setup Complete!</h1>
+            <p>Your personal security bot (ID: ${appId}) is now fully configured and live.</p>
+            <p>The final step is to install the app on your repositories:</p>
+            <a href="${appConfig.html_url}/installations/new" style="background: #2ea44f; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 20px;">Install Bot on Repositories</a>
+            <button onClick="window.close()" class="block w-full text-sm text-gray-500 font-medium hover:underline mt-4">Close Window</button>
         </div>
-
-        <script>
-            setTimeout(() => {
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('success').style.display = 'block';
-            }, 15000);
-        </script>
     </body>
     </html>
   `);
@@ -327,10 +259,23 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
             analysisResult.summary,
             analysisResult.comments
           );
-          
+
           logger.info('Successfully created PR review', { pull_number });
-        } catch (error) {
-          logger.error('Error processing PR review', { pull_number, error: error.message, stack: error.stack });
+
+          // Record the review in Firestore history
+          await db.collection('github_reviews').add({
+            appId: appId.toString(),
+            ownerUid: req.appConfig?.ownerUid,
+            repo: `${owner}/${repo}`,
+            pullNumber: pull_number,
+            prUrl: payload.pull_request.html_url,
+            summary: analysisResult.summary,
+            commentCount: (analysisResult.comments || []).length,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+          });
+
+          logger.info('Recorded review in history', { pull_number });
+          } catch (error) {          logger.error('Error processing PR review', { pull_number, error: error.message, stack: error.stack });
         }
       })();
       app.emit('pr_process_promise', processPromise);

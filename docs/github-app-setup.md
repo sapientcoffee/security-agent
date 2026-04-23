@@ -1,73 +1,42 @@
-# GitHub App Setup Guide
+# GitHub Integration Guide
 
-This guide provides two ways to setup your GitHub App: the **Automated "One-Click" Method** (Recommended) and the **Manual Method**.
+The Security Audit Platform uses a multi-tenant GitHub App model. Each user creates their own personal GitHub App which is then linked to their profile in the platform.
 
-## 🚀 1. Automated Setup (Recommended)
+## 🚀 One-Click Setup (Recommended)
 
-GitHub supports "Manifests" which allow you to pre-configure an app with one click.
+The easiest way to integrate is through the platform's Dashboard.
 
-1.  **Open the Generator:** Locate the `github-bot/create-app.html` file in this repository.
-2.  **Open in Browser:** Open this file in your web browser.
-3.  **Click "Create GitHub App":** This will redirect you to GitHub with all permissions and events pre-selected.
-4.  **Finalize:** GitHub will ask you to name the app and provide a webhook secret.
-5.  **Download Key:** After creation, GitHub will redirect you back, and you will be prompted to generate and download your private key.
-
----
-
-## 2. Manual Setup (Alternative)
-
-If the automated method doesn't work for you, follow these steps:
-...
-
-## 2. Obtain Credentials
-
-### GITHUB_APP_ID
-On the **General** settings page of your new app, find the **App ID**. It is a 6-to-7 digit number.
-
-### GITHUB_PRIVATE_KEY
-1.  On the **General** page, scroll down to **Private keys**.
-2.  Click **Generate a private key**.
-3.  A `.pem` file will be downloaded to your computer.
-4.  Open this file in a text editor. The entire content (including the `-----BEGIN...` and `-----END...` lines) is your **`GITHUB_PRIVATE_KEY`**.
-
-### GITHUB_WEBHOOK_SECRET
-This is the secret string you entered in Step 1.3 above.
+1.  **Open Dashboard:** Navigate to the platform's web interface and log in.
+2.  **Start Setup:** Click the **"Setup Bot"** button on the "Automate Your Security" banner.
+3.  **Create App:** You will be redirected to GitHub. Choose a name for your bot and click **"Create GitHub App"**.
+4.  **Confirm Permissions:** GitHub will automatically pre-configure the necessary permissions (Pull Request: Write, Contents: Read).
+5.  **Finalize:** After creation, you will be redirected back to the platform. The system will automatically capture your credentials and save them securely in Firestore.
+6.  **Install:** On the final screen, click **"Install on Repositories"** to choose which of your projects the bot should monitor.
 
 ---
 
-## 3. Core Agent Integration
+## 🛠 Troubleshooting & Manual Setup
 
-### AGENT_API_URL
-This is the endpoint of your deployed Security Audit Agent.
-1.  Go to the **Google Cloud Console** -> **Cloud Run**.
-2.  Find the `security-audit-agent` service.
-3.  Append `/api/analyze` to the service URL.
-    *   *Example:* `https://security-audit-agent-xxxx.run.app/api/analyze`
+If the one-click setup fails, you can manually verify the following configuration in your GitHub App settings:
 
-### AGENT_API_TOKEN
-The agent requires an OIDC identity token for authentication.
-*   **For Development:** Generate a temporary token using `gcloud auth print-identity-token`.
-*   **For Production:** The Bot service should ideally use its own Service Account identity to fetch tokens dynamically.
+### Webhook URL
+Must point to the `github-security-bot` service:
+`https://[YOUR_BOT_URL]/api/webhook`
+
+### Permissions
+- **Contents:** Read-only (required to fetch code)
+- **Pull Requests:** Read & Write (required to post review comments)
+- **Metadata:** Read-only (required by GitHub)
+
+### Events
+- **Pull Request:** Triggered on opened, synchronized, and labeled.
 
 ---
 
-## 4. Applying the Variables
-
-### For Local Development (.env)
-```env
-GITHUB_APP_ID=123456
-GITHUB_PRIVATE_KEY="-----BEGIN RSA PRIVATE KEY-----\n...\n-----END RSA PRIVATE KEY-----"
-GITHUB_WEBHOOK_SECRET=your_secret
-AGENT_API_URL=http://localhost:8080/api/analyze
-AGENT_API_TOKEN=your_token
-```
-
-### For Cloud Run Deployment
-```bash
-gcloud run services update github-security-bot \
-  --set-env-vars="GITHUB_APP_ID=123456" \
-  --set-env-vars="GITHUB_PRIVATE_KEY=$(cat path/to/key.pem)" \
-  --set-env-vars="GITHUB_WEBHOOK_SECRET=your_secret" \
-  --set-env-vars="AGENT_API_URL=https://agent.run.app/api/analyze" \
-  --set-env-vars="AGENT_API_TOKEN=your_token"
-```
+## 🗑 Deleting the Integration
+If you wish to disconnect your GitHub App:
+1.  Go to the **Dashboard**.
+2.  Expand the **GitHub Integration** card.
+3.  Click **"Delete"**.
+4.  This will wipe your Private Key, App ID, and Review History from our database.
+5.  *Note: You should also manually uninstall or delete the app from your GitHub account settings.*
