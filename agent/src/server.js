@@ -24,6 +24,9 @@ import { asyncHandler } from "./utils/asyncHandler.js";
 
 dotenv.config();
 
+import { safeJsonParse } from './utils/ai-utils.js';
+import { upsertSecret } from './lib/secrets.js';
+
 const db = admin.firestore();
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -161,10 +164,10 @@ app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
 
   if (structured) {
     try {
-      const parsed = JSON.parse(output);
+      const parsed = safeJsonParse(output);
       return res.json(parsed);
     } catch (e) {
-      logger.error("Failed to parse structured output from AI", { output });
+      logger.error("Failed to parse structured output from AI", { output, error: e.message });
       const error = new Error("Failed to generate structured output");
       error.status = 500;
       throw error;
@@ -299,12 +302,15 @@ app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
 
   logger.info(`Deleting GitHub App integration ${appId} for user ${uid}...`);
 
-  // 2. Delete the GitHub App document
-  await db.collection('github_apps').doc(appId).delete();
-  
-  // 3. Remove the reference from the user document
-  await db.collection('users').doc(uid).update({
-    githubAppId: admin.firestore.FieldValue.delete()
+  // Use a transaction for atomic deletion of the app document and unlinking from the user
+  await db.runTransaction(async (transaction) => {
+    const appDocRef = db.collection('github_apps').doc(appId);
+    const userDocRef = db.collection('users').doc(uid);
+
+    transaction.delete(appDocRef);
+    transaction.update(userDocRef, {
+      githubAppId: admin.firestore.FieldValue.delete()
+    });
   });
 
   logger.info(`Successfully deleted GitHub App ${appId} and unlinked from user ${uid}`);
@@ -344,24 +350,35 @@ app.post("/api/github/finalize-setup", verifyToken, asyncHandler(async (req, res
   }
 
   const appConfig = await githubResponse.json();
+  const appId = appConfig.id.toString();
+
+  // Store the private key securely in Secret Manager
+  logger.info(`Storing private key in Secret Manager for App ${appId}...`);
+  const secretName = await upsertSecret(appId, appConfig.pem);
 
   const githubData = {
-    appId: appConfig.id.toString(),
+    appId: appId,
     name: appConfig.name,
     webhookSecret: appConfig.webhook_secret,
-    privateKey: appConfig.pem,
+    // We no longer store the PEM in plaintext. 
+    // We store the secret name and a flag for retrieval.
+    privateKeySecretName: secretName,
+    useSecretManager: true,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
     ownerUid: uid,
     htmlUrl: appConfig.html_url
   };
 
-  // Store by appId for fast lookup during webhooks, and link to uid
-  await db.collection('github_apps').doc(githubData.appId).set(githubData);
-  
-  // Also store reference in user document
-  await db.collection('users').doc(uid).set({
-    githubAppId: githubData.appId
-  }, { merge: true });
+  // Store by appId for fast lookup during webhooks, and link to uid in a transaction for atomicity
+  await db.runTransaction(async (transaction) => {
+    const appDocRef = db.collection('github_apps').doc(githubData.appId);
+    const userDocRef = db.collection('users').doc(uid);
+
+    transaction.set(appDocRef, githubData);
+    transaction.set(userDocRef, {
+      githubAppId: githubData.appId
+    }, { merge: true });
+  });
 
   logger.info(`Successfully stored GitHub App ${githubData.appId} for user ${uid}`);
 

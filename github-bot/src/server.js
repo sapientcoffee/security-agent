@@ -72,6 +72,10 @@ app.use((req, res, next) => {
   });
 });
 
+import { getSecret } from './lib/secrets.js';
+import { enqueueAnalysis } from './lib/tasks.js';
+import { verifyTaskToken } from './middleware/auth.js';
+
 // Helper to retrieve GitHub App config from Firestore
 async function getAppConfig(appId) {
   if (!appId) return null;
@@ -80,7 +84,21 @@ async function getAppConfig(appId) {
     logger.error('No configuration found for App ID in Firestore', { appId });
     return null;
   }
-  return doc.data();
+  
+  const data = doc.data();
+  
+  // If useSecretManager is enabled, fetch the PEM from Secret Manager
+  if (data.useSecretManager && data.privateKeySecretName) {
+    try {
+      logger.info('Fetching private key from Secret Manager', { appId });
+      data.privateKey = await getSecret(data.privateKeySecretName);
+    } catch (error) {
+      logger.error('Failed to fetch private key from Secret Manager', { appId, error: error.message });
+      // We continue, the caller will handle the missing privateKey
+    }
+  }
+  
+  return data;
 }
 
 // Serve the app creation manifest at the root
@@ -146,6 +164,76 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
+
+/**
+ * Cloud Tasks handler for processing PR reviews.
+ * This ensures reliability in serverless environments like Cloud Run.
+ */
+app.post('/task/process-pr', verifyTaskToken, asyncHandler(async (req, res) => {
+  const { payload, appId, appConfig, traceId } = req.body;
+  
+  if (!payload || !appId || !appConfig) {
+    const error = new Error('Missing required task payload');
+    error.status = 400;
+    throw error;
+  }
+
+  const owner = payload.repository.owner.login;
+  const repo = payload.repository.name;
+  const pull_number = payload.pull_request.number;
+  const installationId = payload.installation?.id;
+
+  logger.info('Task execution started: Processing PR review', { owner, repo, pull_number, appId });
+
+  // Re-initialize GitHub service with app-specific config
+  const githubService = new GitHubService(
+    appConfig.appId,
+    appConfig.privateKey,
+    installationId
+  );
+
+  try {
+    logger.info('Fetching PR diff', { pull_number });
+    const diff = await githubService.getPRDiff(owner, repo, pull_number);
+    
+    logger.info('Sending diff to Security Agent for analysis', { pull_number });
+    // Use the trace ID from the task for correlation
+    const analysisResult = await analyzeDiff(diff, { 'X-Cloud-Trace-Context': traceId }) || {};
+    
+    const commitId = payload.pull_request.head.sha;
+    logger.info('Creating PR review', { pull_number, commitId });
+    
+    await githubService.createReview(
+      owner,
+      repo,
+      pull_number,
+      commitId,
+      analysisResult.summary || 'Analysis complete.',
+      analysisResult.comments || []
+    );
+
+    logger.info('Successfully created PR review', { pull_number });
+
+    // Record the review in Firestore history
+    await db.collection('github_reviews').add({
+      appId: appId.toString(),
+      ownerUid: appConfig.ownerUid,
+      repo: `${owner}/${repo}`,
+      pullNumber: pull_number,
+      prUrl: payload.pull_request.html_url,
+      summary: analysisResult.summary || 'Analysis complete.',
+      commentCount: (analysisResult.comments || []).length,
+      timestamp: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    logger.info('Recorded review in history', { pull_number });
+    res.status(200).send('Analysis completed and posted');
+  } catch (error) {
+    logger.error('Error in Task processing', { pull_number, error: error.message, stack: error.stack });
+    // Returning a 500 will cause Cloud Tasks to retry
+    throw error;
+  }
+}));
 
 const verifySignature = asyncHandler(async (req, res, next) => {
   const signature = req.headers['x-hub-signature-256'];
@@ -231,57 +319,48 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
       lastTriggeredAt: admin.firestore.FieldValue.serverTimestamp()
     }, { merge: true });
 
-    const githubService = new GitHubService(
-      req.appConfig?.appId || process.env.GITHUB_APP_ID,
-      req.appConfig?.privateKey || process.env.GITHUB_PRIVATE_KEY,
-      installationId
-    );
+    const traceId = asyncLocalStorage.getStore()?.traceId;
 
-    if (process.env.SKIP_BACKGROUND !== 'true') {
-      const traceId = asyncLocalStorage.getStore()?.traceId;
+    try {
+      // Enqueue the analysis via Cloud Tasks for reliability in serverless environments
+      await enqueueAnalysis(payload, appId, req.appConfig, traceId);
+      return res.status(202).send('Analysis enqueued');
+    } catch (enqueueError) {
+      logger.error('Failed to enqueue analysis task, falling back to background execution', { error: enqueueError.message });
       
-      const processPromise = (async () => {
-        try {
-          logger.info('Fetching PR diff', { pull_number });
-          const diff = await githubService.getPRDiff(owner, repo, pull_number);
-          
-          logger.info('Sending diff to Security Agent for analysis', { pull_number });
-          const analysisResult = await analyzeDiff(diff, { 'X-Cloud-Trace-Context': traceId });
-          
-          const commitId = payload.pull_request.head.sha;
-          logger.info('Creating PR review', { pull_number, commitId });
-          
-          await githubService.createReview(
-            owner,
-            repo,
-            pull_number,
-            commitId,
-            analysisResult.summary,
-            analysisResult.comments
-          );
+      // Fallback for environments without Cloud Tasks configured (e.g. local dev)
+      if (process.env.SKIP_BACKGROUND !== 'true') {
+        const githubService = new GitHubService(
+          req.appConfig?.appId || process.env.GITHUB_APP_ID,
+          req.appConfig?.privateKey || process.env.GITHUB_PRIVATE_KEY,
+          installationId
+        );
 
-          logger.info('Successfully created PR review', { pull_number });
-
-          // Record the review in Firestore history
-          await db.collection('github_reviews').add({
-            appId: appId.toString(),
-            ownerUid: req.appConfig?.ownerUid,
-            repo: `${owner}/${repo}`,
-            pullNumber: pull_number,
-            prUrl: payload.pull_request.html_url,
-            summary: analysisResult.summary,
-            commentCount: (analysisResult.comments || []).length,
-            timestamp: admin.firestore.FieldValue.serverTimestamp()
-          });
-
-          logger.info('Recorded review in history', { pull_number });
-          } catch (error) {          logger.error('Error processing PR review', { pull_number, error: error.message, stack: error.stack });
-        }
-      })();
-      app.emit('pr_process_promise', processPromise);
+        (async () => {
+          try {
+            logger.info('BACKGROUND FALLBACK: Fetching PR diff', { pull_number });
+            const diff = await githubService.getPRDiff(owner, repo, pull_number);
+            const analysisResult = await analyzeDiff(diff, { 'X-Cloud-Trace-Context': traceId }) || {};
+            
+            await githubService.createReview(owner, repo, pull_number, payload.pull_request.head.sha, analysisResult.summary || 'Analysis complete.', analysisResult.comments || []);
+            
+            await db.collection('github_reviews').add({
+              appId: appId.toString(),
+              ownerUid: req.appConfig?.ownerUid,
+              repo: `${owner}/${repo}`,
+              pullNumber: pull_number,
+              prUrl: payload.pull_request.html_url,
+              summary: analysisResult.summary || 'Analysis complete.',
+              commentCount: (analysisResult.comments || []).length,
+              timestamp: admin.firestore.FieldValue.serverTimestamp()
+            });
+          } catch (error) {
+            logger.error('Error in background fallback processing', { pull_number, error: error.message });
+          }
+        })();
+      }
+      return res.status(202).send('Accepted (background fallback)');
     }
-
-    return res.status(202).send('Accepted');
   }
 
   res.status(200).send('Ignored PR action');

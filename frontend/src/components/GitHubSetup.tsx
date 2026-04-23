@@ -111,11 +111,21 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
   };
 
   const startManifestFlow = () => {
+    // Derive the webhook URL from the API base URL
+    const apiBaseUrl = apiClient.defaults.baseURL || '';
+    const fullApiBaseUrl = apiBaseUrl.startsWith('http') 
+      ? apiBaseUrl 
+      : window.location.origin + (apiBaseUrl === '/' ? '' : apiBaseUrl);
+      
+    const webhookUrl = fullApiBaseUrl.endsWith('/') 
+      ? `${fullApiBaseUrl}api/webhook` 
+      : `${fullApiBaseUrl}/api/webhook`;
+
     const manifest = {
       "name": "Security Bot-" + Math.floor(Math.random() * 1000),
       "url": window.location.origin,
       "hook_attributes": {
-        "url": "https://github-security-bot-300502296392.us-central1.run.app/api/webhook"
+        "url": webhookUrl
       },
       "redirect_url": window.location.origin,
       "public": false,
