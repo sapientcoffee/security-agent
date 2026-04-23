@@ -98,6 +98,7 @@ Identify the current state of the project and execute the corresponding phase.
     4. **Inclusions:**
         - **Technical Summary:** High-level overview of architectural and code changes.
         - **Visual & Interaction Evidence:** Use the `chrome-devtools` skill to perform a live walkthrough. Capture screenshots of key UI states and document the step-by-step interactions (clicks, inputs, navigations) within the Markdown file.
+        - **CRITICAL: Image Paths:** When referencing screenshots in `06_WALKTHROUGH.md`, use repository-root relative paths **WITHOUT** a leading slash (e.g., `plans/feature/timestamp/image.png`). This ensures they render correctly in GitHub Pull Request descriptions.
         - **Verification Evidence:** Direct command outputs, API responses, or logs demonstrating the functionality works as intended.
         - **Interactive Walkthrough:** A detailed description of the feature's usage in the local environment, verified against the actual running state and documented with visual assets.
     5. **Cleanup:** **CRITICAL:** Identify and stop any local development servers that were started during this phase before finishing.
