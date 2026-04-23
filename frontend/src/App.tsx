@@ -28,6 +28,17 @@ function cn(...inputs: ClassValue[]) {
 
 type InputType = 'text' | 'git' | 'file';
 
+export type AuditStatus = 'idle' | 'cloning' | 'parsing' | 'analyzing' | 'completed' | 'error';
+
+export interface AuditRecord {
+  id: string;
+  timestamp: number;
+  repoUrl: string;
+  inputType: InputType;
+  report: string;
+  summary: string;
+}
+
 export default function App() {
   const { user, loading } = useAuth();
   const [inputType, setInputType] = useState<InputType>('text');
@@ -35,7 +46,40 @@ export default function App() {
   const [report, setReport] = useState<string | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  const [auditStatus, setAuditStatus] = useState<AuditStatus>('idle');
+  const [history, setHistory] = useState<AuditRecord[]>(() => {
+    const saved = localStorage.getItem('auditHistory');
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        console.error('Failed to parse history from localStorage', e);
+        return [];
+      }
+    }
+    return [];
+  });
+  const [selectedHistoryId, setSelectedHistoryId] = useState<string | null>(null);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const saveToHistory = (newReport: string, url: string, type: InputType) => {
+    const newRecord: AuditRecord = {
+      id: new Date().getTime().toString(),
+      timestamp: Date.now(),
+      repoUrl: url,
+      inputType: type,
+      report: newReport,
+      summary: `Audit from ${new Date().toLocaleString()}`,
+    };
+    
+    setHistory(prev => {
+      const updated = [newRecord, ...prev];
+      localStorage.setItem('auditHistory', JSON.stringify(updated));
+      return updated;
+    });
+  };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -76,6 +120,9 @@ export default function App() {
       setIsAnalyzing(false);
     }
   };
+
+  // Temporarily suppress unused variable warnings
+  console.log(auditStatus, setAuditStatus, history, selectedHistoryId, setSelectedHistoryId, saveToHistory);
 
   if (loading) {
     return (

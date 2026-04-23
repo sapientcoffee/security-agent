@@ -11,8 +11,8 @@ The following new components will be created in the frontend workspace to suppor
   - [x] Step 1.A: Update `agent/src/git-processor.js` to accept and fire progress events.
   - [x] Step 1.B: Update `agent/src/server.js` to support SSE streaming (via POST + chunked transfer).
 - [ ] **Phase 2: Frontend State & Storage**
-  - [ ] Step 2.A: Install `react-syntax-highlighter`.
-  - [ ] Step 2.B: Implement LocalStorage persistence and `auditStatus` state in `App.tsx`.
+  - [x] Step 2.A: Install `react-syntax-highlighter`.
+  - [x] Step 2.B: Implement LocalStorage persistence and `auditStatus` state in `App.tsx`.
 - [ ] **Phase 3: Frontend Components**
   - [ ] Step 3.A: Build `AnalysisProgress.tsx` (stepper).
   - [ ] Step 3.B: Build `AuditHistorySidebar.tsx` (history menu).
