@@ -1,7 +1,7 @@
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { VertexAI } from "@google-cloud/vertexai";
 
-export function getLLMModel(systemInstruction) {
+export function getLLMModel(systemInstruction, generationConfig) {
   if (process.env.USE_VERTEX_AI === "true") {
     const vertexAI = new VertexAI({
       project: process.env.VERTEX_PROJECT,
@@ -10,6 +10,7 @@ export function getLLMModel(systemInstruction) {
     return vertexAI.getGenerativeModel({
       model: process.env.VERTEX_MODEL || "gemini-3.1-pro-preview",
       systemInstruction,
+      generationConfig,
     });
   } else {
     if (!process.env.GOOGLE_API_KEY) {
@@ -19,6 +20,7 @@ export function getLLMModel(systemInstruction) {
     return genAI.getGenerativeModel({
       model: process.env.MODEL_NAME || "gemini-3-flash-preview",
       systemInstruction,
+      generationConfig,
     });
   }
 }

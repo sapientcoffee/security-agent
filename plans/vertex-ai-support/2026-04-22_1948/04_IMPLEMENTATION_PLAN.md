@@ -7,9 +7,10 @@
   - [x] Step 2.A: Implement `getLLMModel` logic
   - [x] Step 2.B: Write unit tests for Provider
 
-- [ ] Phase 3: Refactor Server
-  - [ ] Step 3.A: Integrate `llm-provider.js` into `server.js`
+- [x] Phase 3: Refactor Server
+  - [x] Step 3.A: Integrate `llm-provider.js` into `server.js`
   - [ ] Step 3.B: Verify End-to-End Functionality
+
 
 ## 📝 Step-by-Step Implementation Details
 

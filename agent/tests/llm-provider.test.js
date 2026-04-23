@@ -46,9 +46,10 @@ describe("getLLMModel", () => {
       process.env.VERTEX_MODEL = "gemini-3.1-pro-preview";
     });
 
-    it("should instantiate VertexAI with correct project and location", () => {
+    it("should instantiate VertexAI with correct project and location and generationConfig", () => {
       const systemInstruction = "You are an expert.";
-      getLLMModel(systemInstruction);
+      const generationConfig = { responseMimeType: "application/json" };
+      getLLMModel(systemInstruction, generationConfig);
 
       expect(VertexAI).toHaveBeenCalledWith({
         project: "test-project",
@@ -59,6 +60,7 @@ describe("getLLMModel", () => {
       expect(vertexInstance.getGenerativeModel).toHaveBeenCalledWith({
         model: "gemini-3.1-pro-preview",
         systemInstruction,
+        generationConfig,
       });
     });
 
@@ -91,9 +93,10 @@ describe("getLLMModel", () => {
       process.env.MODEL_NAME = "gemini-3-flash-preview";
     });
 
-    it("should instantiate GoogleGenerativeAI with GOOGLE_API_KEY", () => {
+    it("should instantiate GoogleGenerativeAI with GOOGLE_API_KEY and generationConfig", () => {
       const systemInstruction = "test instruction";
-      getLLMModel(systemInstruction);
+      const generationConfig = { responseMimeType: "application/json" };
+      getLLMModel(systemInstruction, generationConfig);
 
       expect(GoogleGenerativeAI).toHaveBeenCalledWith("test-api-key");
 
@@ -101,6 +104,7 @@ describe("getLLMModel", () => {
       expect(genAIInstance.getGenerativeModel).toHaveBeenCalledWith({
         model: "gemini-3-flash-preview",
         systemInstruction,
+        generationConfig,
       });
     });
 

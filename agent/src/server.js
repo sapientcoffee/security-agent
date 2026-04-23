@@ -14,7 +14,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import crypto from "crypto";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getLLMModel } from "./lib/llm-provider.js";
 import { getAgentCard } from "./agent-card.js";
 import { processGitRepo } from "./git-processor.js";
 import logger, { asyncLocalStorage } from "./utils/logger.js";
@@ -93,8 +93,6 @@ if (!API_KEY) {
   logger.error("Missing GOOGLE_API_KEY environment variable");
 }
 
-const genAI = new GoogleGenerativeAI(API_KEY);
-
 app.get("/agent-card", (req, res) => {
   // Construct absolute base URL, ensuring HTTPS if behind a proxy like Cloud Run
   const protocol = req.get('x-forwarded-proto') || req.protocol;
@@ -152,11 +150,7 @@ app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
     };
   }
 
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-3-flash-preview",
-    systemInstruction,
-    generationConfig
-  });
+  const model = getLLMModel(systemInstruction, generationConfig);
 
   const result = await model.generateContent(codeToAnalyze);
   const response = await result.response;
@@ -204,10 +198,7 @@ app.post("/v1/message:send", verifyToken, asyncHandler(async (req, res) => {
 
   logger.info("Calling Google AI Studio with gemini-3-flash-preview...", { module: 'ai' });
 
-  const model = genAI.getGenerativeModel({ 
-    model: "gemini-3-flash-preview",
-    systemInstruction: "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report."
-  });
+  const model = getLLMModel("You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report.");
 
   const result = await model.generateContent(input);
 
