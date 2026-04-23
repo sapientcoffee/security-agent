@@ -28,7 +28,7 @@ export function CodeBlock({ language, value }: CodeBlockProps) {
       >
         {isCopied ? <Check size={16} className="text-green-400" /> : <Copy size={16} />}
       </button>
-      {/* @ts-expect-error - react-syntax-highlighter types are incompatible with React 18 */}
+      {/* @ts-ignore - react-syntax-highlighter types are sometimes incompatible with React 18 */}
       <SyntaxHighlighter
         language={language || 'text'}
         style={vscDarkPlus}

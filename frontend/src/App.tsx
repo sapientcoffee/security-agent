@@ -426,9 +426,12 @@ export default function App() {
                   ul: ({node: _node, ...props}) => <ul className="list-disc pl-6 mb-4 space-y-2 text-gray-700" {...props} />,
                   li: ({node: _node, ...props}) => <li {...props} />,
                   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                  code: ({node: _node, inline, className, children, ...props}: any) => {
+                  code: ({node, className, children, ...props}: any) => {
                     const match = /language-(\w+)/.exec(className || '');
-                    return !inline ? (
+                    // In react-markdown v9+, code blocks are those with a language class or inside a pre
+                    const isCodeBlock = !!match || (node && node.tagName === 'code' && node.position?.start.line !== node.position?.end.line);
+                    
+                    return isCodeBlock ? (
                       <CodeBlock 
                         language={match ? match[1] : 'text'} 
                         value={String(children).replace(/\n$/, '')} 
