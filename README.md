@@ -6,14 +6,26 @@ A professional, multi-tenant platform for automated functional and security audi
 
 ## 🏗️ Architecture Overview
 
-The system is built as a distributed microservices platform, leveraging serverless computing and managed database services for high availability and security.
+The system is a multi-modal security intelligence platform built entirely on **Google Cloud**. It provides a high-level orchestration layer between modern development workflows and generative AI, enabling automated and on-demand security auditing across Web, CLI, and GitHub environments.
 
-![Platform Architecture](./nanobanana-output/a_technical_architecture_diagram.png)
+![High-Level Architecture](./nanobanana-output/a_highlevel_google_cloud_archite.png)
 
 ### Core Services
-- **Frontend (React + Vite + Tailwind)**: The command center. Users manage their GitHub integrations, view historical audit reports, and perform on-demand manual scans.
-- **Backend Agent (Node.js/Express)**: The intelligence hub. Responsible for code retrieval (Git cloning), multi-tenant state management (Firestore), secure credential storage (Secret Manager), and AI orchestration (Gemini).
-- **GitHub Bot (Node.js)**: The automation bridge. A lightweight webhook processor that handles incoming PR events and manages long-running analysis tasks via Cloud Tasks.
+- **Frontend (React + Vite)**: A centralized dashboard for managing multi-tenant GitHub integrations and viewing historical audit reports.
+- **GeminiCLI**: A terminal-based interface allowing developers to trigger ad-hoc security audits directly from their local machine.
+- **Backend Agent (Node.js)**: The core intelligence engine. It manages multi-tenant state (Firestore), secure credentials (Secret Manager), and coordinates with Gemini AI for deep code analysis.
+- **GitHub Bot**: A high-performance webhook processor that automates security checks on Pull Requests using Google Cloud Tasks for reliable job queuing.
+
+## 🛡️ Detailed System Design
+
+For a deeper look into the internal service interactions, multi-tenant partitioning, and secure data flows, refer to the detailed architecture diagram below.
+
+![Detailed System Architecture](./nanobanana-output/a_highly_detailed_technical_arch.png)
+
+### Security & Multi-tenancy
+- **Isolation**: Each tenant's data is partitioned within **Firestore**, ensuring strict data boundaries for audits and findings.
+- **Secret Management**: All sensitive credentials, including GitHub Private Keys and API Tokens, are stored in **Google Cloud Secret Manager** and retrieved just-in-time by the Backend Agent.
+- **AI Orchestration**: The system leverages **Vertex AI (Gemini Pro)** to perform context-aware security reviews, providing actionable remediation advice.
 
 ## 🔄 Global Flows
 
@@ -27,11 +39,16 @@ When a user pushes code to a Pull Request:
 6.  **AI**: Agent invokes Gemini 3.1 Flash with specialized security engineering instructions.
 7.  **Feedback**: Bot posts findings back to the PR as inline comments and a summary.
 
-### 2. Manual On-Demand Audit
+### 2. Manual Audit (Web Dashboard)
 1.  **Input**: User provides code via the Frontend dashboard (text, file, or URL).
 2.  **Request**: Frontend calls the Agent's `/api/analyze` endpoint.
 3.  **Analysis**: Agent processes the input and performs the AI audit.
 4.  **Report**: Frontend renders a detailed Markdown report with security findings.
+
+### 3. Manual Audit (GeminiCLI)
+1.  **Request**: Developer issues an audit command via the `gemini` CLI.
+2.  **Execution**: The CLI connects directly to the **Backend Agent**'s secure Cloud Run endpoint (utilizing the [Remote Configuration](.gemini/agents/security-auditor.md) as a bridge).
+3.  **Result**: The AI-driven analysis is streamed back directly to the developer's terminal in real-time.
 
 ## 📁 Project Structure
 
