@@ -14,7 +14,7 @@ The following new components will be created in the frontend workspace to suppor
   - [x] Step 2.A: Install `react-syntax-highlighter`.
   - [x] Step 2.B: Implement LocalStorage persistence and `auditStatus` state in `App.tsx`.
 - [ ] **Phase 3: Frontend Components**
-  - [ ] Step 3.A: Build `AnalysisProgress.tsx` (stepper).
+  - [x] Step 3.A: Build `AnalysisProgress.tsx` (stepper).
   - [ ] Step 3.B: Build `AuditHistorySidebar.tsx` (history menu).
   - [ ] Step 3.C: Build `CodeBlock.tsx` (syntax highlighting & copy action).
 - [ ] **Phase 4: Integration**
