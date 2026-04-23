@@ -24,7 +24,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         email: 'e2e@example.com',
         displayName: 'E2E Bypass User',
         getIdToken: async () => bypassToken,
-      } as any);
+      } as unknown as User);
       setLoading(false);
       return;
     }

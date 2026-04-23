@@ -3,13 +3,12 @@
 @tailwind utilities;
 
 :root {
-  color-scheme: light dark;
+  /* Force light mode base for now as the app is designed with white/gray-50 cards */
+  color-scheme: light;
 }
 
 body {
   margin: 0;
-  display: flex;
-  place-items: center;
-  min-width: 320px;
+  background-color: #f9fafb; /* bg-gray-50 */
   min-height: 100vh;
 }
