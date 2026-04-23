@@ -111,18 +111,24 @@ app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
     if (inputType === 'git') {
       logger.info(`Processing git repo: ${content}`, { module: 'git' });
       codeToAnalyze = await processGitRepo(content, (status) => {
-        res.write(`data: ${JSON.stringify({ status })}\n\n`);
+        if (res.writable) {
+          res.write(`data: ${JSON.stringify({ status })}\n\n`);
+        }
       });
     } else {
       codeToAnalyze = content;
     }
 
     if (!codeToAnalyze) {
-      res.write(`data: ${JSON.stringify({ status: 'error', message: 'No code provided for analysis' })}\n\n`);
+      if (res.writable) {
+        res.write(`data: ${JSON.stringify({ status: 'error', message: 'No code provided for analysis' })}\n\n`);
+      }
       return res.end();
     }
 
-    res.write(`data: ${JSON.stringify({ status: 'analyzing' })}\n\n`);
+    if (res.writable) {
+      res.write(`data: ${JSON.stringify({ status: 'analyzing' })}\n\n`);
+    }
     logger.info("Calling LLM Provider for security analysis...", { module: 'ai', structured });
 
     let systemInstruction = "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.";
@@ -156,17 +162,25 @@ app.post("/api/analyze", verifyToken, asyncHandler(async (req, res) => {
     if (structured) {
       try {
         const parsed = safeJsonParse(output);
-        res.write(`data: ${JSON.stringify({ status: 'completed', report: parsed })}\n\n`);
+        if (res.writable) {
+          res.write(`data: ${JSON.stringify({ status: 'completed', report: JSON.stringify(parsed) })}\n\n`);
+        }
       } catch (e) {
         logger.error("Failed to parse structured output from AI", { output, error: e.message });
-        res.write(`data: ${JSON.stringify({ status: 'error', message: 'Failed to generate structured output' })}\n\n`);
+        if (res.writable) {
+          res.write(`data: ${JSON.stringify({ status: 'error', message: 'Failed to generate structured output' })}\n\n`);
+        }
       }
     } else {
-      res.write(`data: ${JSON.stringify({ status: 'completed', report: output })}\n\n`);
+      if (res.writable) {
+        res.write(`data: ${JSON.stringify({ status: 'completed', report: output })}\n\n`);
+      }
     }
   } catch (error) {
     logger.error("Analysis error:", { error: error.message });
-    res.write(`data: ${JSON.stringify({ status: 'error', message: error.message })}\n\n`);
+    if (res.writable) {
+      res.write(`data: ${JSON.stringify({ status: 'error', message: error.message })}\n\n`);
+    }
   } finally {
     res.end();
   }

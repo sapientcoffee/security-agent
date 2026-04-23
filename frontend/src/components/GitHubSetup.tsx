@@ -7,8 +7,8 @@ interface GitHubConfig {
   appId?: string;
   name?: string;
   htmlUrl?: string;
-  installedAt?: any;
-  lastTriggeredAt?: any;
+  installedAt?: unknown;
+  lastTriggeredAt?: unknown;
   repositories?: string[];
 }
 
@@ -44,6 +44,7 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
     } else {
       fetchData();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Update collapsed state when config is loaded
@@ -84,9 +85,10 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
       setHistory([]);
       setStatus('idle');
       setIsCollapsed(false);
-    } catch (err: any) {
-      console.error(err);
-      setError(err.response?.data?.error || 'Failed to delete GitHub integration.');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      console.error(error);
+      setError(error.response?.data?.error || 'Failed to delete GitHub integration.');
       setStatus('error');
     } finally {
       setLoading(false);
@@ -101,9 +103,10 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
       await apiClient.post('/api/github/finalize-setup', { code });
       await fetchData();
       setStatus('success');
-    } catch (err: any) {
-      console.error(err);
-      setError(err.response?.data?.error || 'Failed to finalize GitHub setup.');
+    } catch (err: unknown) {
+      const error = err as { response?: { data?: { error?: string } } };
+      console.error(error);
+      setError(error.response?.data?.error || 'Failed to finalize GitHub setup.');
       setStatus('error');
     } finally {
       setLoading(false);
@@ -153,9 +156,12 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
     form.submit();
   };
 
-  const formatDate = (timestamp: any) => {
+  const formatDate = (timestamp: unknown) => {
     if (!timestamp) return 'Never';
-    const date = timestamp._seconds ? new Date(timestamp._seconds * 1000) : new Date(timestamp);
+    const ts = timestamp as { _seconds?: number } | string | number;
+    const date = (typeof ts === 'object' && ts !== null && '_seconds' in ts && ts._seconds) 
+      ? new Date(ts._seconds * 1000) 
+      : new Date(ts as string | number);
     return date.toLocaleString();
   };
 
@@ -183,7 +189,7 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
           {history.length > 0 ? (
             <div className="divide-y divide-gray-100">
               {history.map((review) => (
-                <div key={review.id} className="p-6 hover:bg-gray-50/50 transition-colors">
+                <div key={review.id} className="p-6 bg-white hover:bg-blue-50/50 transition-colors">
                   <div className="flex items-start justify-between gap-4">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 text-gray-900 font-semibold">
@@ -240,28 +246,31 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
 
       {config?.configured && status !== 'success' ? (
         // COLLAPSABLE CONFIG CARD
-        <div className="bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
           <button 
             onClick={() => setIsCollapsed(!isCollapsed)}
-            className="w-full p-6 flex items-center justify-between hover:bg-gray-50 transition-colors"
+            className="w-full px-6 py-4 flex items-center justify-between hover:bg-gray-50 transition-colors"
           >
-            <div className="flex items-center gap-4 text-left">
-              <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
-                <Github size={24} />
-              </div>
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">{config.name || 'GitHub Integration'}</h2>
-                <div className="flex items-center gap-2">
-                  <span className={`w-2 h-2 rounded-full ${config.installedAt ? 'bg-green-500' : 'bg-amber-500'}`}></span>
-                  <p className="text-sm text-gray-500">{config.installedAt ? 'Connected & Active' : 'Setup Required'}</p>
+            <div className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 text-left">
+              <div className="flex items-center gap-3">
+                <div className="p-1.5 bg-blue-50 text-blue-600 rounded-lg">
+                  <Github size={20} />
                 </div>
+                <h2 className="text-base font-bold text-gray-900">{config.name || 'GitHub Bot Active'}</h2>
+              </div>
+              <div className="flex items-center gap-2 pl-9 sm:pl-0 border-l-0 sm:border-l sm:border-gray-200 sm:ml-2 sm:pl-4">
+                <span className={`w-2 h-2 rounded-full ${config.installedAt ? 'bg-green-500 animate-pulse' : 'bg-amber-500'}`}></span>
+                <p className="text-sm text-gray-500">{config.installedAt ? 'Monitoring Pull Requests' : 'Setup Required'}</p>
               </div>
             </div>
-            {isCollapsed ? <ChevronDown size={20} className="text-gray-400" /> : <ChevronUp size={20} className="text-gray-400" />}
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-500 hover:text-gray-900 transition-colors">
+              <span className="hidden sm:inline">Manage</span>
+              {isCollapsed ? <ChevronDown size={18} /> : <ChevronUp size={18} />}
+            </div>
           </button>
 
           {!isCollapsed && (
-            <div className="px-8 pb-8 pt-2 space-y-6 animate-in slide-in-from-top-2 duration-300">
+            <div className="px-6 pb-6 pt-0 space-y-6 animate-in slide-in-from-top-2 duration-300">
                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="bg-gray-50 p-4 rounded-2xl flex items-start gap-3">
                   <Clock className="text-gray-400 mt-1" size={18} />
@@ -291,7 +300,7 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
                   href={config.htmlUrl + '/installations/new'} 
                   target="_blank" 
                   rel="noopener noreferrer"
-                  className="flex-1 py-3 bg-gray-900 text-white rounded-xl font-bold text-center hover:bg-gray-800 transition-colors flex items-center justify-center gap-2"
+                  className="flex-1 py-3 bg-blue-600 text-white rounded-xl font-bold text-center hover:bg-blue-700 transition-colors flex items-center justify-center gap-2"
                 >
                   <ExternalLink size={18} />
                   Manage Installation
@@ -331,15 +340,16 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
         </div>
       ) : (
         // BANNER FOR NEW USERS
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-700 rounded-3xl shadow-xl p-8 text-white space-y-6 relative overflow-hidden">
+        <div className="bg-gradient-to-r from-blue-700 via-indigo-600 to-violet-800 rounded-3xl shadow-xl p-10 md:p-12 text-white space-y-6 relative overflow-hidden">
           <div className="absolute top-0 right-0 -mr-16 -mt-16 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
+          <div className="absolute bottom-0 left-0 -ml-16 -mb-16 w-64 h-64 bg-white/10 rounded-full blur-3xl"></div>
           <div className="relative z-10 flex flex-col md:flex-row items-center justify-between gap-8">
-            <div className="text-center md:text-left space-y-4 max-w-xl">
+            <div className="text-center md:text-left space-y-4 max-w-2xl">
               <div className="inline-flex items-center gap-2 px-3 py-1 bg-white/20 rounded-full text-xs font-bold uppercase tracking-wider backdrop-blur-md">
                 <Github size={14} />
                 New Integration
               </div>
-              <h2 className="text-3xl font-extrabold tracking-tight">Automate Your Security</h2>
+              <h2 className="text-3xl md:text-4xl font-extrabold tracking-tight">Automate Your Security Reviews</h2>
               <p className="text-blue-100 text-lg leading-relaxed">
                 Connect your own GitHub App to enable automated security reviews for every 
                 Pull Request. Get AI-powered feedback directly in your dev workflow.
@@ -351,7 +361,7 @@ export function GitHubSetup({ mode = 'config' }: { mode?: 'config' | 'history' }
               className="flex-shrink-0 px-8 py-4 bg-white text-blue-700 rounded-2xl font-black text-lg flex items-center justify-center gap-3 hover:bg-blue-50 transition-all transform active:scale-[0.98] shadow-2xl shadow-blue-900/20"
             >
               <Github size={24} />
-              Setup Bot
+              Connect GitHub
             </button>
           </div>
         </div>
