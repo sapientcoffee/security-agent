@@ -7,9 +7,10 @@
 /**
  * Sends PR diff to Security Agent POST /api/analyze
  * @param {string} diffText 
+ * @param {Record<string, string>} extraHeaders
  * @returns {Promise<any>}
  */
-export async function analyzeDiff(diffText) {
+export async function analyzeDiff(diffText, extraHeaders = {}) {
   const url = process.env.AGENT_API_URL || 'http://localhost:8080/api/analyze';
   const token = process.env.AGENT_API_TOKEN || '';
 
@@ -18,7 +19,8 @@ export async function analyzeDiff(diffText) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
+        'Authorization': `Bearer ${token}`,
+        ...extraHeaders
       },
       body: JSON.stringify({
         inputType: 'code',
@@ -34,7 +36,6 @@ export async function analyzeDiff(diffText) {
     const data = await response.json();
     return data;
   } catch (error) {
-    console.error('Error in analyzeDiff:', error);
     throw error;
   }
 }

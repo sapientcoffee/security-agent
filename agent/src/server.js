@@ -45,12 +45,13 @@ const sanitizeHeaders = (headers) => {
 app.use((req, res, next) => {
   const start = Date.now();
   
-  // Support Google Cloud Trace correlation via X-Cloud-Trace-Context header
+  // Extract Trace ID from Google Cloud Trace header if present
   const traceHeader = req.get('x-cloud-trace-context');
-  const traceIdMatch = traceHeader ? traceHeader.match(/^([a-f0-9]{32})/) : null;
-  const requestId = (traceIdMatch && traceIdMatch[1]) || req.get('x-request-id') || crypto.randomUUID();
+  const traceId = traceHeader ? traceHeader.split('/')[0] : crypto.randomUUID();
+  const fullTraceId = process.env.GOOGLE_CLOUD_PROJECT 
+    ? `projects/${process.env.GOOGLE_CLOUD_PROJECT}/traces/${traceId}`
+    : traceId;
 
-  // Standard Google Cloud Logging httpRequest object
   const httpRequest = {
     requestMethod: req.method,
     requestUrl: req.originalUrl || req.url,
@@ -58,34 +59,11 @@ app.use((req, res, next) => {
     remoteIp: req.get('x-forwarded-for') || req.socket.remoteAddress,
   };
 
-  const context = { requestId, httpRequest };
+  const context = { traceId: fullTraceId, httpRequest };
   
   asyncLocalStorage.run(context, () => {
-    logger.info(`>>> REQUEST ${req.method} ${req.url}`);
+    logger.info(`${req.method} ${req.url}`);
     
-    // Don't log full headers or body for analysis requests to keep logs cleaner
-    if (req.url === '/api/analyze') {
-      logger.debug("Analysis Request (Headers/Body omitted for brevity)");
-    } else {
-      logger.debug("Request Headers", { headers: sanitizeHeaders(req.headers) });
-      if (req.method === 'POST' && req.body) {
-        let bodyString;
-        try {
-          bodyString = JSON.stringify(req.body);
-        } catch (_e) {
-          bodyString = "[Unserializable Body]";
-        }
-        
-        if (bodyString.length > 1000) {
-          logger.debug(`Request Body: <OMITTED, length: ${bodyString.length}>`);
-        } else {
-          logger.debug("Request Body", { body: req.body });
-        }
-      }
-    }
-
-    // Capture the current context to explicitly re-run in the finish event listener,
-    // ensuring correlation isn't lost during final output.
     res.on('finish', () => {
       const duration = Date.now() - start;
       const finalHttpRequest = {
@@ -96,7 +74,7 @@ app.use((req, res, next) => {
       };
 
       asyncLocalStorage.run({ ...context, httpRequest: finalHttpRequest }, () => {
-        logger.info(`<<< RESPONSE Status: ${res.statusCode} (${duration}ms)`);
+        logger.info(`Response Status: ${res.statusCode} (${duration}ms)`);
       });
     });
 
@@ -248,6 +226,68 @@ app.post("/v1/message:send", verifyToken, asyncHandler(async (req, res) => {
 }));
 
 /**
+ * Get the current user's GitHub App configuration.
+ */
+app.get("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  
+  // Get user doc to find appId
+  const userDoc = await db.collection('users').doc(uid).get();
+  if (!userDoc.exists || !userDoc.data().githubAppId) {
+    return res.json({ configured: false });
+  }
+
+  const appId = userDoc.data().githubAppId;
+  const appDoc = await db.collection('github_apps').doc(appId).get();
+  
+  if (!appDoc.exists) {
+    return res.json({ configured: false });
+  }
+
+  const data = appDoc.data();
+  res.json({
+    configured: true,
+    appId: data.appId,
+    name: data.name || 'Personal Security Bot',
+    htmlUrl: data.htmlUrl,
+    installedAt: data.installedAt,
+    lastTriggeredAt: data.lastTriggeredAt,
+    repositories: data.repositories || []
+  });
+}));
+
+/**
+ * Delete the current user's GitHub App configuration and references.
+ */
+app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  
+  // 1. Get user doc to find the appId
+  const userDoc = await db.collection('users').doc(uid).get();
+  if (!userDoc.exists || !userDoc.data().githubAppId) {
+    const error = new Error('No GitHub configuration found to delete');
+    error.status = 404;
+    throw error;
+  }
+
+  const appId = userDoc.data().githubAppId;
+
+  logger.info(`Deleting GitHub App integration ${appId} for user ${uid}...`);
+
+  // 2. Delete the GitHub App document
+  await db.collection('github_apps').doc(appId).delete();
+  
+  // 3. Remove the reference from the user document
+  await db.collection('users').doc(uid).update({
+    githubAppId: admin.firestore.FieldValue.delete()
+  });
+
+  logger.info(`Successfully deleted GitHub App ${appId} and unlinked from user ${uid}`);
+
+  res.json({ success: true, message: 'GitHub integration removed successfully' });
+}));
+
+/**
  * Exchange GitHub App Manifest code for credentials and store them in Firestore.
  */
 app.post("/api/github/finalize-setup", verifyToken, asyncHandler(async (req, res) => {
@@ -279,9 +319,10 @@ app.post("/api/github/finalize-setup", verifyToken, asyncHandler(async (req, res
   }
 
   const appConfig = await githubResponse.json();
-  
+
   const githubData = {
     appId: appConfig.id.toString(),
+    name: appConfig.name,
     webhookSecret: appConfig.webhook_secret,
     privateKey: appConfig.pem,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),

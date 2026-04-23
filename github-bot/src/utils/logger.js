@@ -2,7 +2,7 @@ import winston from 'winston';
 import { LoggingWinston } from '@google-cloud/logging-winston';
 import { AsyncLocalStorage } from 'async_hooks';
 
-// AsyncLocalStorage to hold request-scoped context (like traceId)
+// AsyncLocalStorage to hold request-scoped context (like requestId)
 export const asyncLocalStorage = new AsyncLocalStorage();
 
 /**
@@ -12,7 +12,8 @@ export const asyncLocalStorage = new AsyncLocalStorage();
 const contextFormat = winston.format((info) => {
   const store = asyncLocalStorage.getStore();
   if (store) {
-    // Map traceId to GCL trace field for better correlation
+    // Map requestId to GCL trace field for better correlation
+    // Format: projects/[PROJECT_ID]/traces/[TRACE_ID]
     if (store.traceId) {
       info['logging.googleapis.com/trace'] = store.traceId;
     }
@@ -31,12 +32,15 @@ const contextFormat = winston.format((info) => {
 
 const transports = [];
 
+// In Cloud Run environment, stdout is captured as text.
+// Using LoggingWinston directly ensures logs are structured for Cloud Logging.
 if (process.env.K_SERVICE) {
   transports.push(new LoggingWinston({
-    labels: { service: 'security-audit-agent' },
-    logName: 'agent-logs',
+    labels: { service: 'github-security-bot' },
+    logName: 'github-bot-logs',
   }));
 } else {
+  // Console transport for local development
   transports.push(new winston.transports.Console({
     format: winston.format.combine(
       winston.format.colorize(),

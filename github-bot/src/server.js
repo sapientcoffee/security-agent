@@ -10,15 +10,16 @@ import crypto from 'crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { GoogleAuth } from 'google-auth-library';
-import { db } from './lib/firebase.js';
+import { db, admin } from './lib/firebase.js';
 import { GitHubService } from './github-service.js';
 import { analyzeDiff } from './agent-client.js';
 import { asyncHandler } from './utils/asyncHandler.js';
+import logger, { asyncLocalStorage } from './utils/logger.js';
 
 // Load environment variables
 dotenv.config();
 
-console.info('>>> GitHub Security Bot Starting...');
+logger.info('>>> GitHub Security Bot Starting...');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -26,35 +27,77 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+// Middleware for request correlation and logging
+app.use((req, res, next) => {
+  const start = Date.now();
+  
+  // Extract Trace ID from Google Cloud Trace header if present
+  const traceHeader = req.get('x-cloud-trace-context');
+  const traceId = traceHeader ? traceHeader.split('/')[0] : crypto.randomUUID();
+  const fullTraceId = process.env.GOOGLE_CLOUD_PROJECT 
+    ? `projects/${process.env.GOOGLE_CLOUD_PROJECT}/traces/${traceId}`
+    : traceId;
+
+  const httpRequest = {
+    requestMethod: req.method,
+    requestUrl: req.originalUrl || req.url,
+    userAgent: req.get('user-agent'),
+    remoteIp: req.get('x-forwarded-for') || req.socket.remoteAddress,
+  };
+
+  const context = { 
+    traceId: fullTraceId, 
+    httpRequest,
+    appId: req.headers['x-github-hook-installation-target-id']
+  };
+  
+  asyncLocalStorage.run(context, () => {
+    logger.info(`${req.method} ${req.url}`);
+    
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      const finalHttpRequest = {
+        ...httpRequest,
+        status: res.statusCode,
+        latency: `${(duration / 1000).toFixed(3)}s`,
+        responseSize: res.get('Content-Length'),
+      };
+
+      asyncLocalStorage.run({ ...context, httpRequest: finalHttpRequest }, () => {
+        logger.info(`Response Status: ${res.statusCode} (${duration}ms)`);
+      });
+    });
+
+    next();
+  });
+});
+
 // Helper to retrieve GitHub App config from Firestore
 async function getAppConfig(appId) {
   if (!appId) return null;
   const doc = await db.collection('github_apps').doc(appId.toString()).get();
   if (!doc.exists) {
-    console.error(`>>> No configuration found for App ID: ${appId}`);
+    logger.error('No configuration found for App ID in Firestore', { appId });
     return null;
   }
   return doc.data();
 }
 
-// Function to update Cloud Run environment variables
+// Function to update Cloud Run environment variables (Self-Configuration)
 async function updateCloudRunConfig(newEnv) {
   const auth = new GoogleAuth({
     scopes: 'https://www.googleapis.com/auth/cloud-platform'
   });
   const client = await auth.getClient();
   const projectId = await auth.getProjectId();
-  const serviceName = 'github-security-bot';
+  const serviceName = process.env.K_SERVICE || 'github-security-bot';
   const region = 'us-central1';
   
-  // 1. Get current service configuration
   const url = `https://${region}-run.googleapis.com/v2/projects/${projectId}/locations/${region}/services/${serviceName}`;
   const getResponse = await client.request({ url });
   const service = getResponse.data;
 
-  // 2. Prepare new environment variables
   const newEnvArray = Object.entries(newEnv).map(([name, value]) => ({ name, value }));
-  
   const currentEnv = service.template.containers[0].env || [];
   const updatedEnv = [...currentEnv];
   
@@ -67,22 +110,13 @@ async function updateCloudRunConfig(newEnv) {
     }
   }
 
-  // 3. Update the service
   service.template.containers[0].env = updatedEnv;
   
-  delete service.status;
-  delete service.uri;
-  delete service.reconciling;
-  delete service.etag;
-  delete service.uid;
-  delete service.createTime;
-  delete service.updateTime;
-  delete service.deleteTime;
-  delete service.expireTime;
-  delete service.creator;
-  delete service.lastModifier;
+  // Clean up read-only/immutable fields for PATCH
+  const deleteFields = ['status', 'uri', 'reconciling', 'etag', 'uid', 'createTime', 'updateTime', 'deleteTime', 'expireTime', 'creator', 'lastModifier'];
+  deleteFields.forEach(f => delete service[f]);
 
-  console.info(`>>> Updating Cloud Run service ${serviceName} with new credentials...`);
+  logger.info('Updating Cloud Run service with new credentials...', { serviceName });
   await client.request({
     url,
     method: 'PATCH',
@@ -119,17 +153,18 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
   }
 
   const appConfig = await response.json();
-  
   const appId = appConfig.id.toString();
   const webhookSecret = appConfig.webhook_secret;
   const privateKey = appConfig.pem;
+
+  logger.info('Converted GitHub Manifest code to credentials', { appId });
 
   if (process.env.K_SERVICE) {
     updateCloudRunConfig({
       GITHUB_APP_ID: appId,
       GITHUB_WEBHOOK_SECRET: webhookSecret,
       GITHUB_PRIVATE_KEY: privateKey
-    }).catch(err => console.error('>>> Auto-update failed:', err));
+    }).catch(err => logger.error('Auto-update failed', { error: err.message }));
   }
 
   res.status(200).send(`
@@ -161,6 +196,7 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
                 <p>Your bot is now fully configured and live.</p>
                 <p>The final step is to install the app on your repositories:</p>
                 <a href="${appConfig.html_url}/installations/new" style="background: #2ea44f; color: white; padding: 12px 24px; border-radius: 6px; text-decoration: none; font-weight: bold; display: inline-block; margin-top: 20px;">Install Bot on Repositories</a>
+                <button onClick="window.close()" class="block w-full text-sm text-gray-500 font-medium hover:underline mt-4">Close Window</button>
             </div>
         </div>
 
@@ -178,7 +214,7 @@ app.get('/setup-callback', asyncHandler(async (req, res) => {
 app.get('/health', (req, res) => {
   res.status(200).json({ status: 'ok' });
 });
-// Webhook verification middleware
+
 const verifySignature = asyncHandler(async (req, res, next) => {
   const signature = req.headers['x-hub-signature-256'];
   const appId = req.headers['x-github-hook-installation-target-id'];
@@ -189,20 +225,18 @@ const verifySignature = asyncHandler(async (req, res, next) => {
     return next(error);
   }
 
-  // 1. Get Secret from Environment (Global) or Firestore (Multi-tenant)
   let secret = process.env.GITHUB_WEBHOOK_SECRET;
 
   if (appId) {
     const appConfig = await getAppConfig(appId);
     if (appConfig?.webhookSecret) {
       secret = appConfig.webhookSecret;
-      // Attach config to request for later use
       req.appConfig = appConfig;
     }
   }
 
   if (!secret) {
-    console.error('>>> GITHUB_WEBHOOK_SECRET not found for App ID:', appId);
+    logger.error('Webhook secret not found for App ID', { appId });
     const error = new Error('Server configuration error');
     error.status = 500;
     return next(error);
@@ -223,19 +257,32 @@ const verifySignature = asyncHandler(async (req, res, next) => {
 
 app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignature, asyncHandler(async (req, res) => {
   const event = req.headers['x-github-event'];
-  console.info(`>>> Received webhook: event=${event}`);
+  const appId = req.headers['x-github-hook-installation-target-id'];
   
   if (event === 'ping') {
     return res.status(200).send('pong');
+  }
+
+  const payload = JSON.parse(req.body.toString('utf8'));
+
+  // Handle Installation Events
+  if (event === 'installation' || event === 'installation_repositories') {
+    const repos = (payload.repositories || payload.repositories_added || []).map(r => r.full_name);
+    logger.info('Updating installation status', { appId, repos });
+    
+    await db.collection('github_apps').doc(appId.toString()).set({
+      installedAt: admin.firestore.FieldValue.serverTimestamp(),
+      repositories: admin.firestore.FieldValue.arrayUnion(...repos)
+    }, { merge: true });
+    
+    return res.status(200).send('Installation updated');
   }
 
   if (event !== 'pull_request') {
     return res.status(200).send('Ignored event type');
   }
 
-  const payload = JSON.parse(req.body.toString('utf8'));
   const action = payload.action;
-
   const isManualTrigger = action === 'labeled' && payload.label?.name === 'security-review';
   const isAutoTrigger = action === 'opened' || action === 'synchronize';
 
@@ -245,8 +292,13 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
     const pull_number = payload.pull_request.number;
     const installationId = payload.installation?.id;
 
-    console.info(`>>> PROCESSING: owner=${owner}, repo=${repo}, pull_number=${pull_number}, installationId=${installationId}, trigger=${action}`);
+    logger.info('Processing PR event', { owner, repo, pull_number, trigger: action, appId });
     
+    // Update last triggered time in Firestore
+    await db.collection('github_apps').doc(appId.toString()).set({
+      lastTriggeredAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+
     const githubService = new GitHubService(
       req.appConfig?.appId || process.env.GITHUB_APP_ID,
       req.appConfig?.privateKey || process.env.GITHUB_PRIVATE_KEY,
@@ -254,16 +306,18 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
     );
 
     if (process.env.SKIP_BACKGROUND !== 'true') {
+      const traceId = asyncLocalStorage.getStore()?.traceId;
+      
       const processPromise = (async () => {
         try {
-          console.info(`>>> Fetching PR diff for #${pull_number}...`);
+          logger.info('Fetching PR diff', { pull_number });
           const diff = await githubService.getPRDiff(owner, repo, pull_number);
           
-          console.info(`>>> Sending diff to Security Agent for analysis...`);
-          const analysisResult = await analyzeDiff(diff);
+          logger.info('Sending diff to Security Agent for analysis', { pull_number });
+          const analysisResult = await analyzeDiff(diff, { 'X-Cloud-Trace-Context': traceId });
           
           const commitId = payload.pull_request.head.sha;
-          console.info(`>>> Creating PR review for commit ${commitId}...`);
+          logger.info('Creating PR review', { pull_number, commitId });
           
           await githubService.createReview(
             owner,
@@ -274,9 +328,9 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
             analysisResult.comments
           );
           
-          console.info(`>>> Successfully created PR review for #${pull_number}`);
+          logger.info('Successfully created PR review', { pull_number });
         } catch (error) {
-          console.error(`>>> Error processing PR #${pull_number}:`, error);
+          logger.error('Error processing PR review', { pull_number, error: error.message, stack: error.stack });
         }
       })();
       app.emit('pr_process_promise', processPromise);
@@ -289,7 +343,7 @@ app.post('/api/webhook', express.raw({ type: 'application/json' }), verifySignat
 }));
 
 app.use((err, req, res, next) => {
-  console.error('>>> Error Handler:', err.message);
+  logger.error('Internal Server Error', { error: err.message, stack: err.stack, status: err.status });
   const status = err.status || 500;
   res.status(status).json({
     error: err.message || 'Internal Server Error'
@@ -298,7 +352,7 @@ app.use((err, req, res, next) => {
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
-    console.info(`>>> GitHub Security Bot server listening on port ${PORT}`);
+    logger.info('GitHub Security Bot server listening', { port: PORT });
   });
 }
 
