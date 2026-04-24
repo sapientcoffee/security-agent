@@ -12,9 +12,7 @@ export function resetClientsForTesting() {
 export function getLLMModel(systemInstruction, generationConfig) {
   if (cachedAgent) {
     cachedAgent.instruction = systemInstruction;
-    if (generationConfig) {
-      cachedAgent.generationConfig = generationConfig;
-    }
+    cachedAgent.generationConfig = generationConfig || {};
     return cachedAgent;
   }
 
