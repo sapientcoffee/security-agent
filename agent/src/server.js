@@ -38,6 +38,7 @@ import {
 
 const db = admin.firestore();
 const app = express();
+const PORT = process.env.PORT || 3000;
 app.use(express.json({ limit: '10mb' }));
 
 // Security Fix: Restrict CORS to trusted origins

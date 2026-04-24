@@ -16,7 +16,7 @@ describe('Telemetry Bootstrap', () => {
     // We import the telemetry module dynamically so the mocks are applied first
     const { initTelemetry } = await import('../src/lib/telemetry.js');
     
-    initTelemetry();
+    await initTelemetry();
 
     // Verify ADK methods were called to set up OpenTelemetry
     expect(getGcpExporters).toHaveBeenCalled();
