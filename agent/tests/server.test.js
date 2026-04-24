@@ -15,18 +15,20 @@ import request from "supertest";
 import express from "express";
 import cors from "cors";
 import { getAgentCard } from "../src/agent-card.js";
+import { LlmAgent } from "@google/adk";
 
-// Mock @google/generative-ai
-vi.mock("@google/generative-ai", () => {
+// Mock @google/adk
+vi.mock("@google/adk", () => {
   return {
-    GoogleGenerativeAI: vi.fn().mockImplementation(() => ({
-      getGenerativeModel: vi.fn().mockImplementation(() => ({
-        generateContent: vi.fn().mockResolvedValue({
-          response: {
-            text: () => "Mocked audit result",
-          },
-        }),
-      })),
+    LlmAgent: vi.fn().mockImplementation(() => ({
+      runAsync: vi.fn().mockResolvedValue({
+        text: "Mocked audit result",
+      }),
+      executeStream: vi.fn().mockImplementation(async function* () {
+        yield { text: "Mocked " };
+        yield { text: "audit " };
+        yield { text: "result" };
+      })
     })),
   };
 });
@@ -46,13 +48,17 @@ app.post("/v1/message:send", async (req, res) => {
   if (!message && !text) {
     return res.status(400).json({ error: "Missing message content" });
   }
+
+  const agent = new LlmAgent({});
+  const result = await agent.runAsync("test code");
+
   res.json({ 
     message: { 
       messageId: "123",
       role: "ROLE_AGENT", 
       content: [
         {
-          text: "Mocked audit result"
+          text: result.text
         }
       ]
     } 
