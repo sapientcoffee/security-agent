@@ -10,7 +10,8 @@ The migration involved refactoring the core AI interaction logic to use the `@go
 1.  **Framework Adoption:** Integrated `@google/adk` as the primary orchestration library, replacing direct usage of `@google-cloud/vertexai` and `@google/generative-ai`.
 2.  **Agent-Oriented Provider:** Refactored `agent/src/lib/llm-provider.js` to return `LlmAgent` instances. These instances encapsulate system instructions and model configurations in a declarative way.
 3.  **Native Telemetry:** Implemented a new telemetry bootstrap module (`agent/src/lib/telemetry.js`) that hooks into the server lifecycle. It uses ADK's `maybeSetOtelProviders` and `getGcpExporters` to automatically ship reasoning traces to Google Cloud Trace.
-4.  **Endpoint Integration:** Updated the Express server endpoints (`/api/analyze` and `/v1/message:send`) to utilize the new `LlmAgent.runAsync()` execution model.
+4. **Endpoint Integration:** Updated the Express server endpoints (`/api/analyze` and `/v1/message:send`) to utilize the new `LlmAgent.runAsync()` execution model.
+5. **A2A 0.3.0 Compliance:** Ensured the `/v1/message:send` endpoint strictly follows the A2A 0.3.0 schema (role: `model`, parts with `kind: text`), resolving an "Invalid part type" error in the Gemini CLI.
 
 ## 🚀 Environment Discovery & Setup
 

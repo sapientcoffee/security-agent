@@ -193,10 +193,14 @@ app.post("/v1/message:send", verifyToken, validateBody(messageSendSchema), async
 
   if (text) {
     input = text;
-  } else if (message?.content && Array.isArray(message.content)) {
-    input = message.content.map(part => part.text || "").join("\n");
   } else {
-    input = message?.content || message?.text || "";
+    // A2A 0.3.0 uses 'parts', earlier versions used 'content'
+    const parts = message?.parts || message?.content;
+    if (parts && Array.isArray(parts)) {
+      input = parts.map(part => part.text || "").join("\n");
+    } else {
+      input = message?.content || message?.text || "";
+    }
   }
   
   if (!input || input === "[object Object]") {
@@ -214,13 +218,14 @@ app.post("/v1/message:send", verifyToken, validateBody(messageSendSchema), async
 
   const responseText = result.text;
 
-  // Finalized A2A compliant response schema for Gemini CLI
+  // Finalized A2A compliant response schema (0.3.0) for Gemini CLI
   res.json({ 
     message: {
       messageId: crypto.randomUUID(),
-      role: "ROLE_AGENT",
-      content: [
+      role: "model",
+      parts: [
         {
+          kind: "text",
           text: responseText
         }
       ]

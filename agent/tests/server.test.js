@@ -55,9 +55,10 @@ app.post("/v1/message:send", async (req, res) => {
   res.json({ 
     message: { 
       messageId: "123",
-      role: "ROLE_AGENT", 
-      content: [
+      role: "model", 
+      parts: [
         {
+          kind: "text",
           text: result.text
         }
       ]
@@ -79,8 +80,9 @@ describe("Security Audit Agent Server", () => {
       .post("/v1/message:send")
       .send({ text: "test code" });
     expect(response.status).toBe(200);
-    expect(response.body.message.role).toBe("ROLE_AGENT");
-    expect(response.body.message.content[0].text).toBe("Mocked audit result");
+    expect(response.body.message.role).toBe("model");
+    expect(response.body.message.parts[0].text).toBe("Mocked audit result");
+    expect(response.body.message.parts[0].kind).toBe("text");
   });
 
   it("should return 400 on POST /v1/message:send with missing message", async () => {
