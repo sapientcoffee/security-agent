@@ -7,7 +7,7 @@
   - [x] Step 2.A: Create telemetry bootstrap verification harness.
   - [x] Step 2.B: Implement the telemetry bootstrap module and hook it into `server.js`.
 - [ ] Phase 3: Refactoring Provider Logic
-  - [ ] Step 3.A: Update `llm-provider.test.js` to assert `LlmAgent` usage.
+  - [x] Step 3.A: Update `llm-provider.test.js` to assert `LlmAgent` usage.
   - [ ] Step 3.B: Refactor `llm-provider.js` to initialize and return the ADK `LlmAgent`.
 - [ ] Phase 4: Integration
   - [ ] Step 4.A: Update `server.test.js` mocks for the new ADK response signatures.
