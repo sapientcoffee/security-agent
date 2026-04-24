@@ -5,7 +5,7 @@
   - [x] Step 1.A: Install `@google/adk` and OpenTelemetry dependencies in the `agent` workspace.
 - [ ] Phase 2: Infrastructure
   - [x] Step 2.A: Create telemetry bootstrap verification harness.
-  - [ ] Step 2.B: Implement the telemetry bootstrap module and hook it into `server.js`.
+  - [x] Step 2.B: Implement the telemetry bootstrap module and hook it into `server.js`.
 - [ ] Phase 3: Refactoring Provider Logic
   - [ ] Step 3.A: Update `llm-provider.test.js` to assert `LlmAgent` usage.
   - [ ] Step 3.B: Refactor `llm-provider.js` to initialize and return the ADK `LlmAgent`.
