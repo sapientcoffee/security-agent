@@ -1,33 +1,19 @@
-// Copyright 2026 Google LLC
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at https://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
-
 import { describe, it, expect, vi } from "vitest";
 import request from "supertest";
 import express from "express";
 import cors from "cors";
 import { getAgentCard } from "../src/agent-card.js";
 
-// Mock @google/generative-ai
-vi.mock("@google/generative-ai", () => {
+// Mock lib/llm-provider.js
+vi.mock("../src/lib/llm-provider.js", () => {
   return {
-    GoogleGenerativeAI: vi.fn().mockImplementation(() => ({
-      getGenerativeModel: vi.fn().mockImplementation(() => ({
-        generateContent: vi.fn().mockResolvedValue({
-          response: {
-            text: () => "Mocked audit result",
-          },
-        }),
-      })),
-    })),
+    runAgent: vi.fn().mockResolvedValue("Mocked audit result"),
+    runAgentStream: vi.fn().mockImplementation(async function* () {
+      yield "Mocked ";
+      yield "audit ";
+      yield "result";
+    }),
+    getLLMModel: vi.fn().mockReturnValue({}),
   };
 });
 
@@ -41,18 +27,22 @@ app.get("/agent-card", (req, res) => {
 });
 
 app.post("/v1/message:send", async (req, res) => {
-  // Simplified mock logic for testing matching the structure of src/server.js
   const { message, text } = req.body;
   if (!message && !text) {
     return res.status(400).json({ error: "Missing message content" });
   }
+
+  const { runAgent } = await import("../src/lib/llm-provider.js");
+  const result = await runAgent("test code");
+
   res.json({ 
     message: { 
       messageId: "123",
-      role: "ROLE_AGENT", 
-      content: [
+      role: "model", 
+      parts: [
         {
-          text: "Mocked audit result"
+          kind: "text",
+          text: result
         }
       ]
     } 
@@ -73,8 +63,9 @@ describe("Security Audit Agent Server", () => {
       .post("/v1/message:send")
       .send({ text: "test code" });
     expect(response.status).toBe(200);
-    expect(response.body.message.role).toBe("ROLE_AGENT");
-    expect(response.body.message.content[0].text).toBe("Mocked audit result");
+    expect(response.body.message.role).toBe("model");
+    expect(response.body.message.parts[0].text).toBe("Mocked audit result");
+    expect(response.body.message.parts[0].kind).toBe("text");
   });
 
   it("should return 400 on POST /v1/message:send with missing message", async () => {

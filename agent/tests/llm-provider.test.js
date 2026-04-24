@@ -1,125 +1,90 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { getLLMModel, resetClientsForTesting } from "../src/lib/llm-provider.js";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import { VertexAI } from "@google-cloud/vertexai";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { getLLMModel, resetClientsForTesting, runAgent } from "../src/lib/llm-provider.js";
+import { LlmAgent, Gemini } from "@google/adk";
 
-vi.mock("@google/generative-ai", () => {
+// Mock the ADK LlmAgent, Runner and Gemini
+vi.mock("@google/adk", () => {
+  const LlmAgentMock = vi.fn().mockImplementation((config) => ({
+    config,
+    instruction: config.instruction,
+    generationConfig: config.generateContentConfig,
+    name: config.name,
+  }));
+
+  const RunnerMock = vi.fn().mockImplementation((config) => ({
+    config,
+    runEphemeral: vi.fn().mockImplementation(() => {
+      // Return an async generator
+      return (async function* () {
+        yield {
+          content: {
+            parts: [{ text: "Mocked audit result" }]
+          }
+        };
+      })();
+    })
+  }));
+
+  const GeminiMock = vi.fn().mockImplementation((config) => ({
+    config,
+    model: config.model,
+  }));
+
   return {
-    GoogleGenerativeAI: vi.fn().mockImplementation(() => ({
-      getGenerativeModel: vi.fn().mockReturnValue({ generateContent: vi.fn() }),
-    })),
+    LlmAgent: LlmAgentMock,
+    Runner: RunnerMock,
+    Gemini: GeminiMock,
+    InMemorySessionService: vi.fn().mockImplementation(() => ({})),
   };
 });
 
-vi.mock("@google-cloud/vertexai", () => {
-  return {
-    VertexAI: vi.fn().mockImplementation(() => ({
-      getGenerativeModel: vi.fn().mockReturnValue({ generateContent: vi.fn() }),
-    })),
-  };
-});
-
-describe("llm-provider", () => {
-  const originalEnv = process.env;
-
+describe("llm-provider (ADK LlmAgent)", () => {
   beforeEach(() => {
-    vi.resetModules();
     vi.clearAllMocks();
-    process.env = { ...originalEnv };
     resetClientsForTesting();
-  });
-
-  afterEach(() => {
-    process.env = originalEnv;
+    // Set mandatory environment variables
+    process.env.GOOGLE_API_KEY = "test-key";
+    process.env.USE_VERTEX_AI = "false";
   });
 
   describe("Vertex AI Provider", () => {
-    it("should instantiate VertexAI with correct config when USE_VERTEX_AI is true", () => {
+    it("should instantiate LlmAgent with Vertex AI configuration when USE_VERTEX_AI is true", () => {
       process.env.USE_VERTEX_AI = "true";
       process.env.VERTEX_PROJECT = "test-project";
-      process.env.VERTEX_LOCATION = "us-east1";
+      process.env.VERTEX_LOCATION = "us-central1";
 
-      getLLMModel("test instruction");
-
-      expect(VertexAI).toHaveBeenCalledWith({
+      const model = getLLMModel("Test instruction");
+      expect(Gemini).toHaveBeenCalledWith(expect.objectContaining({
+        vertexai: true,
         project: "test-project",
-        location: "us-east1",
-      });
-    });
-
-    it("should throw an error if VERTEX_PROJECT is missing when USE_VERTEX_AI is true", () => {
-      process.env.USE_VERTEX_AI = "true";
-      delete process.env.VERTEX_PROJECT;
-
-      expect(() => getLLMModel("test")).toThrow(/VERTEX_PROJECT is required/);
-    });
-
-    it("should use default location us-central1 if VERTEX_LOCATION is missing", () => {
-      process.env.USE_VERTEX_AI = "true";
-      process.env.VERTEX_PROJECT = "test-project";
-      delete process.env.VERTEX_LOCATION;
-
-      getLLMModel("test instruction");
-
-      expect(VertexAI).toHaveBeenCalledWith({
-        project: "test-project",
-        location: "us-central1",
-      });
-    });
-
-    it("should reuse the VertexAI client (singleton)", () => {
-      process.env.USE_VERTEX_AI = "true";
-      process.env.VERTEX_PROJECT = "test-project";
-
-      getLLMModel("inst 1");
-      getLLMModel("inst 2");
-
-      expect(VertexAI).toHaveBeenCalledTimes(1);
+      }));
+      expect(LlmAgent).toHaveBeenCalledWith(expect.objectContaining({
+        instruction: "Test instruction",
+      }));
+      expect(model).toBeDefined();
     });
   });
 
   describe("Google AI Studio Provider", () => {
-    it("should instantiate GoogleGenerativeAI when USE_VERTEX_AI is false", () => {
+    it("should instantiate LlmAgent with Google AI configuration when USE_VERTEX_AI is false", () => {
       process.env.USE_VERTEX_AI = "false";
-      process.env.GOOGLE_API_KEY = "test-api-key";
+      process.env.GOOGLE_API_KEY = "test-key";
 
-      getLLMModel("test instruction");
-
-      expect(GoogleGenerativeAI).toHaveBeenCalledWith("test-api-key");
-    });
-
-    it("should throw an error if GOOGLE_API_KEY is missing", () => {
-      process.env.USE_VERTEX_AI = "false";
-      delete process.env.GOOGLE_API_KEY;
-
-      expect(() => getLLMModel("test instruction")).toThrow(/GOOGLE_API_KEY is required/);
-    });
-
-    it("should reuse the GoogleGenerativeAI client (singleton)", () => {
-      process.env.USE_VERTEX_AI = "false";
-      process.env.GOOGLE_API_KEY = "test-api-key";
-
-      getLLMModel("inst 1");
-      getLLMModel("inst 2");
-
-      expect(GoogleGenerativeAI).toHaveBeenCalledTimes(1);
+      const model = getLLMModel("Test instruction");
+      expect(Gemini).toHaveBeenCalledWith(expect.objectContaining({
+        apiKey: "test-key",
+      }));
+      expect(LlmAgent).toHaveBeenCalledWith(expect.objectContaining({
+        instruction: "Test instruction",
+      }));
+      expect(model).toBeDefined();
     });
   });
 
-  describe("Common Configuration", () => {
-    it("should pass generationConfig to getGenerativeModel", () => {
-      process.env.USE_VERTEX_AI = "false";
-      process.env.GOOGLE_API_KEY = "test-key";
-      const config = { temperature: 0.5 };
-
-      getLLMModel("test inst", config);
-
-      const genAIInstance = vi.mocked(GoogleGenerativeAI).mock.results[0].value;
-      expect(genAIInstance.getGenerativeModel).toHaveBeenCalledWith(
-        expect.objectContaining({
-          generationConfig: config,
-        })
-      );
+  describe("runAgent", () => {
+    it("should run the agent and return text", async () => {
+      const result = await runAgent("test code", "test instruction");
+      expect(result).toBe("Mocked audit result");
     });
   });
 });

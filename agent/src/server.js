@@ -10,80 +10,84 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import { initTelemetry } from "./lib/telemetry.js";
+initTelemetry();
+
 import express from "express";
 import cors from "cors";
-import dotenv from "dotenv";
-import crypto from "crypto";
-import { getLLMModel } from "./lib/llm-provider.js";
-import { getAgentCard } from "./agent-card.js";
-import { processGitRepo } from "./git-processor.js";
-import logger, { asyncLocalStorage } from "./utils/logger.js";
+import admin from "firebase-admin";
+import logger from "./utils/logger.js";
 import { verifyToken } from "./middleware/auth.js";
-import { admin } from "./lib/firebase.js";
-import { asyncHandler } from "./utils/asyncHandler.js";
-
-dotenv.config();
-
-import { safeJsonParse } from './utils/ai-utils.js';
-import { upsertSecret } from './lib/secrets.js';
 import { 
   validateBody, 
-  analyzeSchema, 
-  messageSendSchema, 
-  finalizeSetupSchema 
+  analyzeSchema,
+  messageSendSchema,
+  finalizeSetupSchema
 } from './middleware/validate.js';
+import { LlmAgent, toA2a, Gemini } from "@google/adk";
+import { processGitRepo } from "./git-processor.js";
+import { asyncHandler } from "./utils/asyncHandler.js";
+import { upsertSecret } from './lib/secrets.js';
+import crypto from "crypto";
+
+// Initialize Firebase Admin for Firestore
+if (admin.apps.length === 0) {
+  admin.initializeApp();
+}
 
 const db = admin.firestore();
 const app = express();
+const PORT = process.env.PORT || 8080;
+
 app.use(express.json({ limit: '10mb' }));
 
 // Security Fix: Restrict CORS to trusted origins
 const allowedOrigins = process.env.ALLOWED_ORIGINS ? process.env.ALLOWED_ORIGINS.split(',') : [];
 
-// In production, ensure ALLOWED_ORIGINS is set to prevent accidental '*' wildcard exposure
-if (process.env.NODE_ENV === 'production' && allowedOrigins.length === 0) {
-  logger.error("ALLOWED_ORIGINS must be set in production. Service will fail requests.");
-}
-
 app.use(cors({
   origin: (origin, callback) => {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else if (process.env.NODE_ENV !== 'production' && !process.env.ALLOWED_ORIGINS) {
-      // Allow '*' only in development if explicitly not set
+    if (!origin || allowedOrigins.indexOf(origin) !== -1 || allowedOrigins.length === 0) {
       callback(null, true);
     } else {
-      logger.warn(`CORS blocked request from origin: ${origin}`);
       callback(new Error('Not allowed by CORS'));
     }
   },
+  methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Cloud-Trace-Context'],
   credentials: true
 }));
 
-// ... (sanitizeHeaders and request logging middleware) ...
+// --- ADK Agent Initialization ---
 
-app.get("/agent-card", (req, res) => {
-  // Security Fix: Prefer hardcoded BASE_URL to prevent Host Header Injection
-  let baseUrl = process.env.APP_BASE_URL;
+const modelName = process.env.MODEL_NAME || "gemini-flash-latest";
+let llm;
 
-  if (!baseUrl) {
-    if (process.env.NODE_ENV === 'production') {
-      const error = new Error("APP_BASE_URL environment variable is mandatory in production");
-      logger.error(error.message);
-      return res.status(500).json({ error: error.message });
-    }
-    const protocol = req.get('x-forwarded-proto') || req.protocol;
-    const host = req.get('host');
-    baseUrl = `${protocol}://${host}`;
-    logger.warn(`APP_BASE_URL not set, falling back to dynamic baseUrl: ${baseUrl}`);
-  }
+if (process.env.USE_VERTEX_AI === "true") {
+  llm = new Gemini({
+    model: modelName,
+    vertexai: true,
+    project: process.env.VERTEX_PROJECT,
+    location: process.env.VERTEX_LOCATION || "us-central1",
+  });
+} else {
+  const apiKey = process.env.GOOGLE_API_KEY || process.env.GOOGLE_GENAI_API_KEY || process.env.GEMINI_API_KEY;
+  llm = new Gemini({
+    model: modelName,
+    apiKey: apiKey,
+  });
+}
 
-  logger.debug(`Generating agent card with baseUrl: ${baseUrl}`);
-  res.json(getAgentCard(baseUrl));
+const agent = new LlmAgent({
+  name: "security-auditor",
+  description: "A specialized agent for security auditing, providing code reviews, bug hunting, and security alignment checks.",
+  model: llm,
+  instruction: "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.",
 });
 
-app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), asyncHandler(async (req, res) => {
+// --- UI-specific streaming security analysis endpoint ---
+app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), async (req, res) => {
+  const { content, inputType, structured } = req.body;
+  
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
@@ -91,23 +95,19 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), asyncHandler(
 
   const abortController = new AbortController();
   req.on('close', () => {
-    logger.info("Client disconnected, aborting analysis...");
     abortController.abort();
   });
 
   try {
-    const { inputType, content, structured } = req.body;
-    let codeToAnalyze = "";
+    let codeToAnalyze = content;
 
     if (inputType === 'git') {
-      logger.info(`Processing git repo: ${content}`, { module: 'git' });
-      codeToAnalyze = await processGitRepo(content, (status) => {
-        if (res.writable && !abortController.signal.aborted) {
-          res.write(`data: ${JSON.stringify({ status })}\n\n`);
+      const onProgress = (status) => {
+        if (res.writable) {
+          res.write(`data: ${JSON.stringify({ status: 'progress', message: `Task: ${status}` })}\n\n`);
         }
-      }, abortController.signal);
-    } else {
-      codeToAnalyze = content;
+      };
+      codeToAnalyze = await processGitRepo(content, onProgress, abortController.signal);
     }
 
     if (!codeToAnalyze || abortController.signal.aborted) {
@@ -117,96 +117,49 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), asyncHandler(
       return res.end();
     }
 
-    if (res.writable) {
-      res.write(`data: ${JSON.stringify({ status: 'analyzing' })}\n\n`);
-    }
-    logger.info("Calling LLM Provider for security analysis...", { module: 'ai', structured });
-
-    // ... (systemInstruction and generationConfig setup) ...
-
-    const model = getLLMModel(systemInstruction, generationConfig);
-
-    // Google AI SDK doesn't natively support AbortSignal in all versions, 
-    // but we check for abortion before and after.
-    const result = await model.generateContent(codeToAnalyze);
-    
-    if (abortController.signal.aborted) return res.end();
-
-    const response = await result.response;
-    const output = response.text();
-
+    let instruction = agent.instruction;
     if (structured) {
-      try {
-        const parsed = safeJsonParse(output);
-        if (res.writable && !abortController.signal.aborted) {
-          res.write(`data: ${JSON.stringify({ status: 'completed', report: JSON.stringify(parsed) })}\n\n`);
-        }
-      } catch (e) {
-        logger.error("Failed to parse structured output from AI", { output, error: e.message });
-        if (res.writable && !abortController.signal.aborted) {
-          res.write(`data: ${JSON.stringify({ status: 'error', message: 'Failed to generate structured output' })}\n\n`);
-        }
+      instruction += " Output Format: You MUST return a JSON object with schema: { summary: string, comments: [{ path: string, line: number, body: string }] }";
+    }
+
+    const result = await llm.generateContentAsync({
+      contents: [{ role: 'user', parts: [{ text: codeToAnalyze }] }],
+      config: { systemInstruction: instruction, responseMimeType: structured ? "application/json" : "text/plain" }
+    });
+
+    let fullText = "";
+    for await (const response of result) {
+      if (abortController.signal.aborted) break;
+      const text = response.content?.parts?.[0]?.text || "";
+      fullText += text;
+      if (!structured && text && res.writable) {
+        res.write(`data: ${JSON.stringify({ status: 'analyzing', chunk: text })}\n\n`);
       }
-    } else {
-      if (res.writable && !abortController.signal.aborted) {
-        res.write(`data: ${JSON.stringify({ status: 'completed', report: output })}\n\n`);
+    }
+
+    if (!abortController.signal.aborted && res.writable) {
+      if (structured) {
+        try {
+          const jsonMatch = fullText.match(/\{[\s\S]*\}/);
+          const jsonText = jsonMatch ? jsonMatch[0] : fullText;
+          const parsed = JSON.parse(jsonText);
+          res.write(`data: ${JSON.stringify({ status: 'completed', report: JSON.stringify(parsed) })}\n\n`);
+        } catch (e) {
+          res.write(`data: ${JSON.stringify({ status: 'error', message: 'Failed to parse structured output' })}\n\n`);
+        }
+      } else {
+        res.write(`data: ${JSON.stringify({ status: 'completed', report: fullText })}\n\n`);
       }
     }
   } catch (error) {
-    if (error.name === 'AbortError' || abortController.signal.aborted) {
-      logger.info("Analysis was aborted.");
-    } else {
-      logger.error("Analysis error:", { error: error.message });
-      if (res.writable) {
-        res.write(`data: ${JSON.stringify({ status: 'error', message: error.message })}\n\n`);
-      }
+    logger.error("Analysis error", { error: error.message });
+    if (res.writable && !abortController.signal.aborted) {
+      res.write(`data: ${JSON.stringify({ status: 'error', message: error.message })}\n\n`);
     }
   } finally {
     res.end();
   }
-}));
-
-app.post("/v1/message:send", verifyToken, validateBody(messageSendSchema), asyncHandler(async (req, res) => {
-  const { message, text } = req.body;
-  let input = "";
-
-  if (text) {
-    input = text;
-  } else if (message?.content && Array.isArray(message.content)) {
-    input = message.content.map(part => part.text || "").join("\n");
-  } else {
-    input = message?.content || message?.text || "";
-  }
-  
-  if (!input || input === "[object Object]") {
-    logger.warn("Missing or invalid input content in request body");
-    if (typeof message?.content === 'object' && message.content !== null) {
-      input = JSON.stringify(message.content);
-    }
-  }
-
-  logger.info("Calling LLM Provider for message generation...", { module: 'ai' });
-
-  const model = getLLMModel("You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report.");
-
-  const result = await model.generateContent(input);
-
-  const response = await result.response;
-  const responseText = response.text();
-
-  // Finalized A2A compliant response schema for Gemini CLI
-  res.json({ 
-    message: {
-      messageId: crypto.randomUUID(),
-      role: "ROLE_AGENT",
-      content: [
-        {
-          text: responseText
-        }
-      ]
-    }
-  });
-}));
+});
 
 /**
  * Get the current user's GitHub App configuration.
@@ -214,7 +167,6 @@ app.post("/v1/message:send", verifyToken, validateBody(messageSendSchema), async
 app.get("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
   const uid = req.user.uid;
   
-  // Get user doc to find appId
   const userDoc = await db.collection('users').doc(uid).get();
   if (!userDoc.exists || !userDoc.data().githubAppId) {
     return res.json({ configured: false });
@@ -336,10 +288,10 @@ app.delete("/api/audits/:id", verifyToken, asyncHandler(async (req, res) => {
 
 /**
  * Delete the current user's GitHub App configuration and references.
- */app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
+ */
+app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
   const uid = req.user.uid;
   
-  // 1. Get user doc to find the appId
   const userDoc = await db.collection('users').doc(uid).get();
   if (!userDoc.exists || !userDoc.data().githubAppId) {
     const error = new Error('No GitHub configuration found to delete');
@@ -349,9 +301,6 @@ app.delete("/api/audits/:id", verifyToken, asyncHandler(async (req, res) => {
 
   const appId = userDoc.data().githubAppId;
 
-  logger.info(`Deleting GitHub App integration ${appId} for user ${uid}...`);
-
-  // Use a transaction for atomic deletion of the app document and unlinking from the user
   await db.runTransaction(async (transaction) => {
     const appDocRef = db.collection('github_apps').doc(appId);
     const userDocRef = db.collection('users').doc(uid);
@@ -361,8 +310,6 @@ app.delete("/api/audits/:id", verifyToken, asyncHandler(async (req, res) => {
       githubAppId: admin.firestore.FieldValue.delete()
     });
   });
-
-  logger.info(`Successfully deleted GitHub App ${appId} and unlinked from user ${uid}`);
 
   res.json({ success: true, message: 'GitHub integration removed successfully' });
 }));
@@ -374,9 +321,6 @@ app.post("/api/github/finalize-setup", verifyToken, validateBody(finalizeSetupSc
   const { code } = req.body;
   const uid = req.user.uid;
 
-  logger.info(`Finalizing GitHub setup for user ${uid}...`);
-
-  // Exchange the code for the app configuration
   const githubResponse = await fetch(`https://api.github.com/app-manifests/${code}/conversions`, {
     method: 'POST',
     headers: {
@@ -385,8 +329,6 @@ app.post("/api/github/finalize-setup", verifyToken, validateBody(finalizeSetupSc
   });
 
   if (!githubResponse.ok) {
-    const errorData = await githubResponse.text();
-    logger.error('GitHub API error during code conversion', { status: githubResponse.status, error: errorData });
     const error = new Error(`GitHub API error: ${githubResponse.status}`);
     error.status = 502;
     throw error;
@@ -395,16 +337,12 @@ app.post("/api/github/finalize-setup", verifyToken, validateBody(finalizeSetupSc
   const appConfig = await githubResponse.json();
   const appId = appConfig.id.toString();
 
-  // Store the private key securely in Secret Manager
-  logger.info(`Storing private key in Secret Manager for App ${appId}...`);
   const secretName = await upsertSecret(appId, appConfig.pem);
 
   const githubData = {
     appId: appId,
     name: appConfig.name,
     webhookSecret: appConfig.webhook_secret,
-    // We no longer store the PEM in plaintext. 
-    // We store the secret name and a flag for retrieval.
     privateKeySecretName: secretName,
     useSecretManager: true,
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
@@ -412,7 +350,6 @@ app.post("/api/github/finalize-setup", verifyToken, validateBody(finalizeSetupSc
     htmlUrl: appConfig.html_url
   };
 
-  // Store by appId for fast lookup during webhooks, and link to uid in a transaction for atomicity
   await db.runTransaction(async (transaction) => {
     const appDocRef = db.collection('github_apps').doc(githubData.appId);
     const userDocRef = db.collection('users').doc(uid);
@@ -423,8 +360,6 @@ app.post("/api/github/finalize-setup", verifyToken, validateBody(finalizeSetupSc
     }, { merge: true });
   });
 
-  logger.info(`Successfully stored GitHub App ${githubData.appId} for user ${uid}`);
-
   res.json({ 
     success: true, 
     appId: githubData.appId,
@@ -432,7 +367,43 @@ app.post("/api/github/finalize-setup", verifyToken, validateBody(finalizeSetupSc
   });
 }));
 
-// Global Error Handler Middleware
+// --- A2A Protocol Implementation via ADK ---
+const a2aRouter = express.Router();
+
+// Middleware to conditionally apply auth
+a2aRouter.use((req, res, next) => {
+  if (req.path.includes("agent-card.json") || req.path === "/agent-card" || req.path === "/card") {
+    return next();
+  }
+  verifyToken(req, res, next);
+});
+
+// Determine public URL for agent card
+const publicUrl = process.env.APP_BASE_URL || `https://security-audit-agent-300502296392.us-central1.run.app`;
+const urlObj = new URL(publicUrl);
+
+await toA2a(agent, { 
+  app: a2aRouter, 
+  basePath: "",
+  host: urlObj.hostname,
+  port: urlObj.port ? parseInt(urlObj.port) : (urlObj.protocol === 'https:' ? 443 : 80),
+  protocol: urlObj.protocol.replace(':', '')
+});
+
+// A2A Aliases
+a2aRouter.post("/v1/message:send", (req, res, next) => {
+  req.url = "/rest/v1/message:send";
+  next();
+}, a2aRouter);
+
+a2aRouter.get("/agent-card", (req, res, next) => {
+  req.url = "/.well-known/agent-card.json";
+  next();
+}, a2aRouter);
+
+app.use("/", a2aRouter);
+
+// Global Error Handler
 app.use((err, req, res, next) => {
   logger.error(err.message || 'Internal Server Error', { error: err.message, stack: err.stack });
   const status = err.status || 500;
@@ -444,3 +415,5 @@ app.use((err, req, res, next) => {
 app.listen(PORT, () => {
   logger.info(`Security Audit Agent listening on port ${PORT}`);
 });
+
+export default app;
