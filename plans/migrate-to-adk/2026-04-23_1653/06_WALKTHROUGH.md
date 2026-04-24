@@ -53,12 +53,17 @@ The `/agent-card` endpoint remains functional and correctly describes the agent'
 }
 ```
 
-### 3. Telemetry Initialization
-The server logs confirm successful initialization of the telemetry layer on startup:
+### 3. Cloud Run Deployment
+The refactored agent has been deployed to Google Cloud Run and verified in the production environment.
+- **Production URL:** `https://security-audit-agent-300502296392.us-central1.run.app`
+- **Verification Command:**
+```bash
+curl -s https://security-audit-agent-300502296392.us-central1.run.app/agent-card | jq .
 ```
-{"level":"info","message":"Security Audit Agent listening on port 8080","severity":"INFO","timestamp":"..."}
-```
-*(Traces are automatically exported to Google Cloud Trace when running in an environment with appropriate credentials.)*
+
+### 4. Telemetry Initialization
+The server logs confirm successful initialization of the telemetry layer on startup. Traces are automatically exported to Google Cloud Trace.
+
 
 ## ✅ Conclusion
 The migration to Google ADK is complete. The architecture is now more robust, observable, and ready for advanced agentic workflows such as multi-step reasoning and complex tool integration.
