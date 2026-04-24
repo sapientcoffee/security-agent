@@ -21,10 +21,13 @@ import { verifyToken } from "./middleware/auth.js";
 import { 
   validateBody, 
   analyzeSchema,
-  messageSendSchema
+  messageSendSchema,
+  finalizeSetupSchema
 } from './middleware/validate.js';
 import { LlmAgent, toA2a, Gemini } from "@google/adk";
 import { processGitRepo } from "./git-processor.js";
+import { asyncHandler } from "./utils/asyncHandler.js";
+import { upsertSecret } from './lib/secrets.js';
 import crypto from "crypto";
 
 // Initialize Firebase Admin for Firestore
@@ -32,6 +35,7 @@ if (admin.apps.length === 0) {
   admin.initializeApp();
 }
 
+const db = admin.firestore();
 const app = express();
 const PORT = process.env.PORT || 8080;
 
@@ -48,7 +52,7 @@ app.use(cors({
       callback(new Error('Not allowed by CORS'));
     }
   },
-  methods: ['GET', 'POST', 'OPTIONS'],
+  methods: ['GET', 'POST', 'OPTIONS', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Cloud-Trace-Context'],
   credentials: true
 }));
@@ -139,12 +143,12 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), async (req, r
           const jsonMatch = fullText.match(/\{[\s\S]*\}/);
           const jsonText = jsonMatch ? jsonMatch[0] : fullText;
           const parsed = JSON.parse(jsonText);
-          res.write(`data: ${JSON.stringify({ status: 'completed', report: parsed })}\n\n`);
+          res.write(`data: ${JSON.stringify({ status: 'completed', report: JSON.stringify(parsed) })}\n\n`);
         } catch (e) {
           res.write(`data: ${JSON.stringify({ status: 'error', message: 'Failed to parse structured output' })}\n\n`);
         }
       } else {
-        res.write(`data: ${JSON.stringify({ status: 'completed' })}\n\n`);
+        res.write(`data: ${JSON.stringify({ status: 'completed', report: fullText })}\n\n`);
       }
     }
   } catch (error) {
@@ -156,6 +160,212 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), async (req, r
     res.end();
   }
 });
+
+/**
+ * Get the current user's GitHub App configuration.
+ */
+app.get("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  
+  const userDoc = await db.collection('users').doc(uid).get();
+  if (!userDoc.exists || !userDoc.data().githubAppId) {
+    return res.json({ configured: false });
+  }
+
+  const appId = userDoc.data().githubAppId;
+  const appDoc = await db.collection('github_apps').doc(appId).get();
+  
+  if (!appDoc.exists) {
+    return res.json({ configured: false });
+  }
+
+  const data = appDoc.data();
+  res.json({
+    configured: true,
+    appId: data.appId,
+    name: data.name || 'Personal Security Bot',
+    htmlUrl: data.htmlUrl,
+    installedAt: data.installedAt,
+    lastTriggeredAt: data.lastTriggeredAt,
+    repositories: data.repositories || []
+  });
+}));
+
+/**
+ * Get the current user's GitHub review history.
+ */
+app.get("/api/github/reviews", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+
+  const snapshot = await db.collection('github_reviews')
+    .where('ownerUid', '==', uid)
+    .orderBy('timestamp', 'desc')
+    .limit(20)
+    .get();
+
+  const reviews = [];
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    reviews.push({
+      id: doc.id,
+      ...data,
+      timestamp: data.timestamp?.toDate() || null
+    });
+  });
+
+  res.json(reviews);
+}));
+
+/**
+ * Save a manual audit record to Firestore.
+ */
+app.post("/api/audits", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  const { repoUrl, inputType, report, summary } = req.body;
+
+  if (!report) {
+    return res.status(400).json({ error: "Report content is required" });
+  }
+
+  const docRef = await db.collection('manual_audits').add({
+    ownerUid: uid,
+    repoUrl,
+    inputType,
+    report,
+    summary,
+    timestamp: admin.firestore.FieldValue.serverTimestamp()
+  });
+
+  res.json({ id: docRef.id, success: true });
+}));
+
+/**
+ * Get the current user's manual audit history from Firestore.
+ */
+app.get("/api/audits", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+
+  const snapshot = await db.collection('manual_audits')
+    .where('ownerUid', '==', uid)
+    .orderBy('timestamp', 'desc')
+    .limit(50)
+    .get();
+
+  const audits = [];
+  snapshot.forEach(doc => {
+    const data = doc.data();
+    audits.push({
+      id: doc.id,
+      ...data,
+      timestamp: data.timestamp?.toDate()?.getTime() || Date.now()
+    });
+  });
+
+  res.json(audits);
+}));
+
+/**
+ * Delete a specific manual audit record.
+ */
+app.delete("/api/audits/:id", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  const auditId = req.params.id;
+
+  const docRef = db.collection('manual_audits').doc(auditId);
+  const doc = await docRef.get();
+
+  if (!doc.exists) {
+    return res.status(404).json({ error: "Audit record not found" });
+  }
+
+  if (doc.data().ownerUid !== uid) {
+    return res.status(403).json({ error: "Unauthorized to delete this record" });
+  }
+
+  await docRef.delete();
+  res.json({ success: true });
+}));
+
+/**
+ * Delete the current user's GitHub App configuration and references.
+ */
+app.delete("/api/github/config", verifyToken, asyncHandler(async (req, res) => {
+  const uid = req.user.uid;
+  
+  const userDoc = await db.collection('users').doc(uid).get();
+  if (!userDoc.exists || !userDoc.data().githubAppId) {
+    const error = new Error('No GitHub configuration found to delete');
+    error.status = 404;
+    throw error;
+  }
+
+  const appId = userDoc.data().githubAppId;
+
+  await db.runTransaction(async (transaction) => {
+    const appDocRef = db.collection('github_apps').doc(appId);
+    const userDocRef = db.collection('users').doc(uid);
+
+    transaction.delete(appDocRef);
+    transaction.update(userDocRef, {
+      githubAppId: admin.firestore.FieldValue.delete()
+    });
+  });
+
+  res.json({ success: true, message: 'GitHub integration removed successfully' });
+}));
+
+/**
+ * Exchange GitHub App Manifest code for credentials and store them in Firestore.
+ */
+app.post("/api/github/finalize-setup", verifyToken, validateBody(finalizeSetupSchema), asyncHandler(async (req, res) => {
+  const { code } = req.body;
+  const uid = req.user.uid;
+
+  const githubResponse = await fetch(`https://api.github.com/app-manifests/${code}/conversions`, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/vnd.github+json'
+    }
+  });
+
+  if (!githubResponse.ok) {
+    const error = new Error(`GitHub API error: ${githubResponse.status}`);
+    error.status = 502;
+    throw error;
+  }
+
+  const appConfig = await githubResponse.json();
+  const appId = appConfig.id.toString();
+
+  const secretName = await upsertSecret(appId, appConfig.pem);
+
+  const githubData = {
+    appId: appId,
+    name: appConfig.name,
+    webhookSecret: appConfig.webhook_secret,
+    privateKeySecretName: secretName,
+    useSecretManager: true,
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    ownerUid: uid,
+    htmlUrl: appConfig.html_url
+  };
+
+  await db.runTransaction(async (transaction) => {
+    const appDocRef = db.collection('github_apps').doc(githubData.appId);
+    const userDocRef = db.collection('users').doc(uid);
+
+    transaction.set(appDocRef, githubData);
+    transaction.set(userDocRef, {
+      githubAppId: githubData.appId
+    }, { merge: true });
+  });
+
+  res.json({ 
+    success: true, 
+    appId: githubData.appId,
+    installUrl: `${appConfig.html_url}/installations/new`
+  });
+}));
 
 // --- A2A Protocol Implementation via ADK ---
 const a2aRouter = express.Router();
@@ -180,7 +390,7 @@ await toA2a(agent, {
   protocol: urlObj.protocol.replace(':', '')
 });
 
-// HACK: Add aliases for the root paths if the client ignores transport URL
+// A2A Aliases
 a2aRouter.post("/v1/message:send", (req, res, next) => {
   req.url = "/rest/v1/message:send";
   next();
@@ -192,6 +402,15 @@ a2aRouter.get("/agent-card", (req, res, next) => {
 }, a2aRouter);
 
 app.use("/", a2aRouter);
+
+// Global Error Handler
+app.use((err, req, res, next) => {
+  logger.error(err.message || 'Internal Server Error', { error: err.message, stack: err.stack });
+  const status = err.status || 500;
+  res.status(status).json({
+    error: err.message || 'Internal Server Error'
+  });
+});
 
 app.listen(PORT, () => {
   logger.info(`Security Audit Agent listening on port ${PORT}`);
