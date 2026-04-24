@@ -20,9 +20,12 @@ import logger from "./utils/logger.js";
 import { verifyToken } from "./middleware/auth.js";
 import { 
   validateBody, 
-  analyzeSchema
+  analyzeSchema,
+  messageSendSchema
 } from './middleware/validate.js';
 import { LlmAgent, toA2a, Gemini } from "@google/adk";
+import { processGitRepo } from "./git-processor.js";
+import crypto from "crypto";
 
 // Initialize Firebase Admin for Firestore
 if (admin.apps.length === 0) {
@@ -79,14 +82,37 @@ const agent = new LlmAgent({
 
 // --- UI-specific streaming security analysis endpoint ---
 app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), async (req, res) => {
-  const { codeToAnalyze, structured } = req.body;
+  const { content, inputType, structured } = req.body;
   
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders();
 
+  const abortController = new AbortController();
+  req.on('close', () => {
+    abortController.abort();
+  });
+
   try {
+    let codeToAnalyze = content;
+
+    if (inputType === 'git') {
+      const onProgress = (status) => {
+        if (res.writable) {
+          res.write(`data: ${JSON.stringify({ status: 'progress', message: `Task: ${status}` })}\n\n`);
+        }
+      };
+      codeToAnalyze = await processGitRepo(content, onProgress, abortController.signal);
+    }
+
+    if (!codeToAnalyze || abortController.signal.aborted) {
+      if (res.writable && !abortController.signal.aborted) {
+        res.write(`data: ${JSON.stringify({ status: 'error', message: 'No code provided for analysis or aborted' })}\n\n`);
+      }
+      return res.end();
+    }
+
     let instruction = agent.instruction;
     if (structured) {
       instruction += " Output Format: You MUST return a JSON object with schema: { summary: string, comments: [{ path: string, line: number, body: string }] }";
@@ -99,6 +125,7 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), async (req, r
 
     let fullText = "";
     for await (const response of result) {
+      if (abortController.signal.aborted) break;
       const text = response.content?.parts?.[0]?.text || "";
       fullText += text;
       if (!structured && text && res.writable) {
@@ -106,7 +133,7 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), async (req, r
       }
     }
 
-    if (res.writable) {
+    if (!abortController.signal.aborted && res.writable) {
       if (structured) {
         try {
           const jsonMatch = fullText.match(/\{[\s\S]*\}/);
@@ -121,7 +148,8 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), async (req, r
       }
     }
   } catch (error) {
-    if (res.writable) {
+    logger.error("Analysis error", { error: error.message });
+    if (res.writable && !abortController.signal.aborted) {
       res.write(`data: ${JSON.stringify({ status: 'error', message: error.message })}\n\n`);
     }
   } finally {
