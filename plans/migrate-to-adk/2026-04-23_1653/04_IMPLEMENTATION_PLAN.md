@@ -11,9 +11,9 @@
   - [x] Step 3.B: Refactor `llm-provider.js` to initialize and return the ADK `LlmAgent`.
 - [ ] Phase 4: Integration
   - [x] Step 4.A: Update `server.test.js` mocks for the new ADK response signatures.
-  - [ ] Step 4.B: Update Express endpoints (`/api/analyze` and `/v1/message:send`) in `server.js` to use ADK execution models.
-- [ ] Phase 5: Validation
-  - [ ] Step 5.A: Verify OpenTelemetry trace export and run the full test suite.
+  - [x] Step 4.B: Update Express endpoints (`/api/analyze` and `/v1/message:send`) in `server.js` to use ADK execution models.
+  - [ ] Phase 5: Validation
+    - [x] Step 5.A: Verify OpenTelemetry trace export and run the full test suite.
 
 ## 📝 Step-by-Step Implementation Details
 

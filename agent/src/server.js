@@ -125,18 +125,35 @@ app.post("/api/analyze", verifyToken, validateBody(analyzeSchema), asyncHandler(
     }
     logger.info("Calling LLM Provider for security analysis...", { module: 'ai', structured });
 
-    // ... (systemInstruction and generationConfig setup) ...
+    let systemInstruction = "You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report in Markdown.";
+    let generationConfig = {};
+
+    if (structured) {
+      systemInstruction = `You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. 
+      Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 
+      Output Format: You MUST return a JSON object with the following schema:
+      {
+        "summary": "High-level markdown summary of the findings",
+        "comments": [
+          {
+            "path": "file path",
+            "line": line number (integer),
+            "body": "markdown comment about the specific line"
+          }
+        ]
+      }`;
+      generationConfig = {
+        responseMimeType: "application/json",
+      };
+    }
 
     const model = getLLMModel(systemInstruction, generationConfig);
 
-    // Google AI SDK doesn't natively support AbortSignal in all versions, 
-    // but we check for abortion before and after.
-    const result = await model.generateContent(codeToAnalyze);
+    const result = await model.runAsync(codeToAnalyze);
     
     if (abortController.signal.aborted) return res.end();
 
-    const response = await result.response;
-    const output = response.text();
+    const output = result.text;
 
     if (structured) {
       try {
@@ -192,10 +209,9 @@ app.post("/v1/message:send", verifyToken, validateBody(messageSendSchema), async
 
   const model = getLLMModel("You are a specialized QA and Security Engineer. Your goal is to ensure the provided code is perfectly functional and secure. Instructions: 1. Assess Alignment. 2. Bug Hunting. 3. Security Audit. 4. Output Format: actionable audit report.");
 
-  const result = await model.generateContent(input);
+  const result = await model.runAsync(input);
 
-  const response = await result.response;
-  const responseText = response.text();
+  const responseText = result.text;
 
   // Finalized A2A compliant response schema for Gemini CLI
   res.json({ 
